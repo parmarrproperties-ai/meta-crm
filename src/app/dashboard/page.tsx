@@ -24,6 +24,8 @@ import {
   ChevronUp,
   ChevronDown,
   Minus,
+  Share2,
+  ChevronsUpDown,
 } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { useSearchParams } from "next/navigation";
@@ -114,6 +116,7 @@ function DashboardClient() {
   const [activeChart, setActiveChart] = useState<"spend" | "results">("spend");
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7d" | "14d" | "30d">("today");
   const [activeAdsOnly, setActiveAdsOnly] = useState(false);
+  const [activeCampOnly, setActiveCampOnly] = useState(false);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -175,7 +178,58 @@ function DashboardClient() {
     }
   };
 
+  const handleNativeShare = async () => {
+    if (!summary) return;
+    const text = `📊 *Daily Ads Summary - ${currentProject === "all" ? "Portfolio" : currentProject}*
+${today}
 
+*Total Spend:* ${formatINR(summary.totalSpend)}
+*Total Leads:* ${summary.totalResults}
+*Avg Cost/Lead:* ${formatINR(summary.avgCPA)}
+*Avg CTR:* ${formatNum(summary.avgCTR)}%
+
+${summary.bestAd ? `✅ *Best Ad:* ${summary.bestAd.ad_name} (${formatINR(summary.bestAd.cost_per_result)}/lead)` : ""}
+${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(summary.worstAd.spend)} spend, ${summary.worstAd.results} leads)` : ""}
+`;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Daily Meta Ads Report",
+          text: text,
+        });
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          showToast("Failed to share", "error");
+        }
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast("Report copied to clipboard! You can paste it anywhere.", "success");
+      } catch {
+        showToast("Sharing not supported on this browser", "error");
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        if (!refreshing) handleRefresh();
+      } else if (e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (summary) handleNativeShare();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [refreshing, summary]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -186,7 +240,7 @@ function DashboardClient() {
     }
   };
 
-  const filteredAds = (summary?.ads ?? []).filter((a) => !activeAdsOnly || a.spend > 0);
+  const filteredAds = (summary?.ads ?? []).filter((a) => !activeAdsOnly || a.spend > 0 || a.impressions > 0 || a.results > 0);
   const sortedAds = [...filteredAds].sort((a, b) => {
     const av = a[sortKey] as number | string;
     const bv = b[sortKey] as number | string;
@@ -210,7 +264,7 @@ function DashboardClient() {
     }
   };
 
-  const filteredCampaigns = (summary?.campaigns ?? []).filter((c) => !activeAdsOnly || c.spend > 0);
+  const filteredCampaigns = (summary?.campaigns ?? []).filter((c) => !activeCampOnly || c.spend > 0 || c.impressions > 0 || c.results > 0);
   const sortedCampaigns = [...filteredCampaigns].sort((a, b) => {
     const av = a[campSortKey] as number | string;
     const bv = b[campSortKey] as number | string;
@@ -242,7 +296,7 @@ function DashboardClient() {
         <ChevronDown className="w-3 h-3 inline ml-1 text-blue-500" />
       )
     ) : (
-      <Minus className="w-3 h-3 inline ml-1 text-slate-300" />
+      <ChevronsUpDown className="w-3 h-3 inline ml-1 text-slate-300/50" />
     );
   };
 
@@ -295,10 +349,17 @@ function DashboardClient() {
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-            {refreshing ? "Syncing Meta..." : "Sync Now"}
+            <span className="hidden sm:inline">{refreshing ? "Syncing Meta..." : "Sync Now (R)"}</span>
           </button>
 
-
+          <button
+            onClick={handleNativeShare}
+            disabled={!summary}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-sm font-medium text-white transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-600/20"
+          >
+            <Share2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Share Report (S)</span>
+          </button>
         </div>
       </div>
 
@@ -344,25 +405,25 @@ function DashboardClient() {
             <table className="w-full text-sm text-left">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/30">
-                  <th className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Project Name</th>
-                  <th className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Spend</th>
-                  <th className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Leads</th>
-                  <th className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cost/Lead</th>
-                  <th className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">CTR</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Project Name</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Spend</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Leads</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cost/Lead</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">CTR</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {portfolio.map((p) => (
                   <tr key={p.project_name} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-5 py-4 font-medium text-slate-900">{p.project_name}</td>
-                    <td className="px-5 py-4 text-slate-600">{formatINR(p.spend)}</td>
-                    <td className="px-5 py-4">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
+                    <td className="px-5 py-2.5 font-medium text-slate-900 sticky left-0 bg-white sm:bg-transparent shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10">{p.project_name}</td>
+                    <td className="px-5 py-2.5 text-slate-600">{formatINR(p.spend)}</td>
+                    <td className="px-5 py-2.5">
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
                         {p.results}
                       </span>
                     </td>
-                    <td className="px-5 py-4 font-medium text-slate-900">{formatINR(p.cost_per_result)}</td>
-                    <td className="px-5 py-4 text-slate-500">{formatNum(p.ctr)}%</td>
+                    <td className="px-5 py-2.5 font-medium text-slate-900">{formatINR(p.cost_per_result)}</td>
+                    <td className="px-5 py-2.5 text-slate-500">{formatNum(p.ctr)}%</td>
                   </tr>
                 ))}
               </tbody>
@@ -463,11 +524,11 @@ function DashboardClient() {
             <label className="text-sm font-medium text-slate-600 cursor-pointer flex items-center gap-2 select-none">
               <input 
                 type="checkbox" 
-                checked={activeAdsOnly}
-                onChange={(e) => setActiveAdsOnly(e.target.checked)}
+                checked={activeCampOnly}
+                onChange={(e) => setActiveCampOnly(e.target.checked)}
                 className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
               />
-              Active Campaigns Only (Spend &gt; ₹0)
+              Active Campaigns Only (Activity &gt; 0)
             </label>
           </div>
         </div>
@@ -502,7 +563,7 @@ function DashboardClient() {
                     <th
                       key={key}
                       onClick={() => handleCampSort(key)}
-                      className="px-5 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:text-slate-800 transition-colors whitespace-nowrap bg-slate-50/30"
+                      className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 hover:text-slate-800 transition-colors whitespace-nowrap bg-slate-50/30"
                     >
                       {label}
                       <SortIcon col={key} isCamp={true} />
@@ -514,25 +575,25 @@ function DashboardClient() {
                 {sortedCampaigns.map((camp) => (
                   <tr
                     key={camp.campaign_name}
-                    className="hover:bg-slate-50/70 transition-colors"
+                    className="group hover:bg-slate-50/70 transition-colors"
                   >
-                    <td className="px-5 py-4">
+                    <td className="px-5 py-2.5 sticky left-0 bg-white group-hover:bg-slate-50/70 shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 transition-colors">
                       <p className="font-medium text-slate-900 text-sm">
                         {camp.campaign_name}
                       </p>
                     </td>
-                    <td className="px-5 py-4 font-medium text-slate-700 whitespace-nowrap">
+                    <td className="px-5 py-2.5 font-medium text-slate-700 whitespace-nowrap">
                       {formatINR(camp.spend)}
                     </td>
-                    <td className="px-5 py-4 text-slate-500 whitespace-nowrap">
+                    <td className="px-5 py-2.5 text-slate-500 whitespace-nowrap">
                       {camp.impressions.toLocaleString("en-IN")}
                     </td>
-                    <td className="px-5 py-4 text-slate-500">{camp.clicks.toLocaleString("en-IN")}</td>
-                    <td className="px-5 py-4 text-slate-500">{formatNum(camp.ctr)}%</td>
-                    <td className="px-5 py-4 text-slate-500">{formatINR(camp.cpc)}</td>
-                    <td className="px-5 py-4">
+                    <td className="px-5 py-2.5 text-slate-500">{camp.clicks.toLocaleString("en-IN")}</td>
+                    <td className="px-5 py-2.5 text-slate-500">{formatNum(camp.ctr)}%</td>
+                    <td className="px-5 py-2.5 text-slate-500">{formatINR(camp.cpc)}</td>
+                    <td className="px-5 py-2.5">
                       <span
-                        className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold min-w-[32px] ${
+                        className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${
                           camp.results > 0
                             ? "bg-blue-50 text-blue-700 border border-blue-100"
                             : "bg-slate-100 text-slate-500 border border-slate-200"
@@ -541,7 +602,7 @@ function DashboardClient() {
                         {camp.results}
                       </span>
                     </td>
-                    <td className="px-5 py-4 font-semibold whitespace-nowrap">
+                    <td className="px-5 py-2.5 font-semibold whitespace-nowrap">
                       <span
                         className={
                           camp.results === 0 ? "text-slate-400" : "text-slate-900"
@@ -573,7 +634,7 @@ function DashboardClient() {
                 onChange={(e) => setActiveAdsOnly(e.target.checked)}
                 className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
               />
-              Active Ads Only (Spend &gt; ₹0)
+              Active Ads Only (Activity &gt; 0)
             </label>
           </div>
         </div>
@@ -610,7 +671,7 @@ function DashboardClient() {
                     <th
                       key={key}
                       onClick={() => handleSort(key)}
-                      className="px-5 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:text-slate-800 transition-colors whitespace-nowrap bg-slate-50/30"
+                      className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 hover:text-slate-800 transition-colors whitespace-nowrap bg-slate-50/30"
                     >
                       {label}
                       <SortIcon col={key} />
@@ -622,9 +683,9 @@ function DashboardClient() {
                 {sortedAds.map((ad) => (
                   <tr
                     key={ad.ad_id}
-                    className="hover:bg-slate-50/70 transition-colors"
+                    className="group hover:bg-slate-50/70 transition-colors"
                   >
-                    <td className="px-5 py-4">
+                    <td className="px-5 py-2.5 sticky left-0 bg-white group-hover:bg-slate-50/70 shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 transition-colors">
                       <div className="max-w-[280px]">
                         <p className="font-medium text-slate-900 truncate text-sm">
                           {ad.ad_name}
@@ -635,18 +696,18 @@ function DashboardClient() {
                         </p>
                       </div>
                     </td>
-                    <td className="px-5 py-4 font-medium text-slate-700 whitespace-nowrap">
+                    <td className="px-5 py-2.5 font-medium text-slate-700 whitespace-nowrap">
                       {formatINR(ad.spend)}
                     </td>
-                    <td className="px-5 py-4 text-slate-500 whitespace-nowrap">
+                    <td className="px-5 py-2.5 text-slate-500 whitespace-nowrap">
                       {ad.impressions.toLocaleString("en-IN")}
                     </td>
-                    <td className="px-5 py-4 text-slate-500">{ad.clicks.toLocaleString("en-IN")}</td>
-                    <td className="px-5 py-4 text-slate-500">{formatNum(ad.ctr)}%</td>
-                    <td className="px-5 py-4 text-slate-500">{formatINR(ad.cpc)}</td>
-                    <td className="px-5 py-4">
+                    <td className="px-5 py-2.5 text-slate-500">{ad.clicks.toLocaleString("en-IN")}</td>
+                    <td className="px-5 py-2.5 text-slate-500">{formatNum(ad.ctr)}%</td>
+                    <td className="px-5 py-2.5 text-slate-500">{formatINR(ad.cpc)}</td>
+                    <td className="px-5 py-2.5">
                       <span
-                        className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold min-w-[32px] ${
+                        className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${
                           ad.results > 0
                             ? "bg-blue-50 text-blue-700 border border-blue-100"
                             : "bg-slate-100 text-slate-500 border border-slate-200"
@@ -655,7 +716,7 @@ function DashboardClient() {
                         {ad.results}
                       </span>
                     </td>
-                    <td className="px-5 py-4 font-semibold whitespace-nowrap">
+                    <td className="px-5 py-2.5 font-semibold whitespace-nowrap">
                       <span
                         className={
                           ad.results === 0 ? "text-slate-400" : "text-slate-900"

@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Sparkles,
+  Share2,
 } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { useSearchParams } from "next/navigation";
@@ -150,6 +151,41 @@ function WeeklyDashboardClient() {
     }
   };
 
+  const handleNativeShare = async () => {
+    if (!report) return;
+    const text = `📊 *Weekly Ads Summary - ${currentProject === "all" ? "Portfolio" : currentProject}*
+${new Date(report.week_start).toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${new Date(report.week_end).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
+
+*Total Spend:* ${formatINR(report.total_spend)}
+*Total Leads:* ${report.total_results}
+*Avg Cost/Lead:* ${formatINR(report.avg_cpa)}
+*Avg CTR:* ${report.avg_ctr.toFixed(2)}%
+
+${report.top_ads.length > 0 ? `✅ *Top Ad:* ${report.top_ads[0].ad_name} (${formatINR(report.top_ads[0].cost_per_result)}/lead)` : ""}
+${report.bottom_ads.length > 0 ? `⚠️ *Watch:* ${report.bottom_ads[0].ad_name} (${formatINR(report.bottom_ads[0].spend)} spend, ${report.bottom_ads[0].results} leads)` : ""}
+`;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Weekly Meta Ads Report",
+          text: text,
+        });
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          showToast("Failed to share", "error");
+        }
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast("Report copied to clipboard! You can paste it anywhere.", "success");
+      } catch {
+        showToast("Sharing not supported on this browser", "error");
+      }
+    }
+  };
+
 
   const historyMetrics = [
     { key: "total_spend" as const, label: "Spend", color: "#3b82f6" },
@@ -203,7 +239,16 @@ function WeeklyDashboardClient() {
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
             <RefreshCw className={`w-4 h-4 ${computing ? "animate-spin" : ""}`} />
-            {computing ? "Computing…" : "Compute Report"}
+            <span className="hidden sm:inline">{computing ? "Computing…" : "Compute Report"}</span>
+          </button>
+
+          <button
+            onClick={handleNativeShare}
+            disabled={!report}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-sm font-medium text-white transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-600/20"
+          >
+            <Share2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Share Report</span>
           </button>
 
 
