@@ -12,6 +12,7 @@ create table daily_ad_snapshots (
   id uuid primary key default gen_random_uuid(),
   snapshot_date date not null,
   account_id text not null,
+  account_name text,
   project_name text not null,
   ad_id text not null,
   ad_name text not null,
@@ -50,6 +51,7 @@ create table weekly_reports (
   results_change_pct numeric,
   top_ads jsonb,
   bottom_ads jsonb,
+  campaigns jsonb,
   ai_summary text,
   created_at timestamptz default now(),
   unique (week_start, project_name)

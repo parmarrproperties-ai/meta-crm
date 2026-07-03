@@ -24,7 +24,19 @@ import {
   Share2,
 } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
+import { ShareButton } from "@/components/ShareButton";
+import { SnapshotStatCards, SnapshotTable } from "@/components/snapshots/SnapshotComponents";
 import { useSearchParams } from "next/navigation";
+import { addDays } from "@/lib/compute";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
+function getMostRecentWeekStart(): string {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+  const lastMonday = new Date(today);
+  lastMonday.setDate(today.getDate() - ((dayOfWeek + 6) % 7) - 7);
+  return lastMonday.toISOString().split("T")[0];
+}
 
 interface WeeklyReport {
   week_start: string;
@@ -38,6 +50,14 @@ interface WeeklyReport {
   results_change_pct: number | null;
   top_ads: Array<{ ad_name: string; results: number; cost_per_result: number; spend: number }>;
   bottom_ads: Array<{ ad_name: string; results: number; spend: number }>;
+  campaigns?: Array<{
+    campaign_name: string;
+    spend: number;
+    results: number;
+    cost_per_result: number;
+    top_ads: Array<{ ad_name: string; results: number; cost_per_result: number; spend: number }>;
+    bottom_ads: Array<{ ad_name: string; results: number; spend: number }>;
+  }>;
   ai_summary: string | null;
 }
 
@@ -96,6 +116,8 @@ function WeeklyDashboardClient() {
   const [computing, setComputing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [activeHistoryMetric, setActiveHistoryMetric] = useState<"total_spend" | "total_results" | "avg_cpa">("total_spend");
+  const [weekStart, setWeekStart] = useState<string | null>(null);
+  const [adScope, setAdScope] = useState<"overall" | "per-campaign">("overall");
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -105,16 +127,18 @@ function WeeklyDashboardClient() {
   const loadReport = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/reports/weekly-read?project=${encodeURIComponent(currentProject)}`);
+      const qs = `project=${encodeURIComponent(currentProject)}${weekStart ? `&week_start=${weekStart}` : ""}`;
+      const res = await fetch(`/api/reports/weekly-read?${qs}`);
       const json = await res.json();
       if (json.report) setReport(json.report);
+      else setReport(null); // Clear report if not found for this week
       if (json.history) setHistory(json.history);
     } catch {
       // Report may not exist yet — that's OK
     } finally {
       setLoading(false);
     }
-  }, [currentProject]);
+  }, [currentProject, weekStart]);
 
   useEffect(() => {
     loadReport();
@@ -123,7 +147,8 @@ function WeeklyDashboardClient() {
   const handleCompute = async () => {
     setComputing(true);
     try {
-      const res = await fetch(`/api/reports/weekly?project=${encodeURIComponent(currentProject)}`, { method: "POST" });
+      const qs = `project=${encodeURIComponent(currentProject)}${weekStart ? `&week_start=${weekStart}` : ""}`;
+      const res = await fetch(`/api/reports/weekly?${qs}`, { method: "POST" });
       const json = await res.json();
       if (json.success) {
         showToast("✓ Weekly report computed", "success");
@@ -139,6 +164,7 @@ function WeeklyDashboardClient() {
           results_change_pct: json.summary.resultsChangePct,
           top_ads: json.summary.topAds,
           bottom_ads: json.summary.bottomAds,
+          campaigns: json.summary.campaigns,
           ai_summary: json.aiSummary,
         });
       } else {
@@ -153,17 +179,8 @@ function WeeklyDashboardClient() {
 
   const handleNativeShare = async () => {
     if (!report) return;
-    const text = `📊 *Weekly Ads Summary - ${currentProject === "all" ? "Portfolio" : currentProject}*
-${new Date(report.week_start).toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${new Date(report.week_end).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
-
-*Total Spend:* ${formatINR(report.total_spend)}
-*Total Leads:* ${report.total_results}
-*Avg Cost/Lead:* ${formatINR(report.avg_cpa)}
-*Avg CTR:* ${report.avg_ctr.toFixed(2)}%
-
-${report.top_ads.length > 0 ? `✅ *Top Ad:* ${report.top_ads[0].ad_name} (${formatINR(report.top_ads[0].cost_per_result)}/lead)` : ""}
-${report.bottom_ads.length > 0 ? `⚠️ *Watch:* ${report.bottom_ads[0].ad_name} (${formatINR(report.bottom_ads[0].spend)} spend, ${report.bottom_ads[0].results} leads)` : ""}
-`;
+    const { generateWeeklyWhatsAppText } = await import("@/lib/whatsappFormat");
+    const text = generateWeeklyWhatsAppText(report, currentProject);
     
     if (navigator.share) {
       try {
@@ -223,13 +240,38 @@ ${report.bottom_ads.length > 0 ? `⚠️ *Watch:* ${report.bottom_ads[0].ad_name
       {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
             Weekly Report
-            <span className="text-slate-400 font-normal ml-2 text-xl">
+            <span className="text-slate-400 font-normal text-xl">
               {isAllProjects ? "Portfolio" : currentProject}
             </span>
           </h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium" suppressHydrationWarning>{weekLabel}</p>
+          <div className="flex items-center gap-4 mt-1.5">
+            <p className="text-slate-500 text-sm font-medium min-w-[200px]" suppressHydrationWarning>{weekLabel}</p>
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+              <button
+                onClick={() => {
+                  const target = report ? report.week_start : weekStart || getMostRecentWeekStart();
+                  setWeekStart(addDays(target, -7));
+                }}
+                className="p-1 rounded-md text-slate-500 hover:text-slate-900 hover:bg-white transition-colors"
+                title="Previous Week"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => {
+                  const target = report ? report.week_start : weekStart || getMostRecentWeekStart();
+                  setWeekStart(addDays(target, 7));
+                }}
+                disabled={(report?.week_start || weekStart || getMostRecentWeekStart()) >= getMostRecentWeekStart()}
+                className="p-1 rounded-md text-slate-500 hover:text-slate-900 hover:bg-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                title="Next Week"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -267,7 +309,11 @@ ${report.bottom_ads.length > 0 ? `⚠️ *Watch:* ${report.bottom_ads[0].ad_name
       )}
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-4 gap-5 mb-8">
+      <div className="flex items-center justify-between mb-4 mt-8">
+        <h3 className="font-semibold text-slate-900">Top-Level Metrics</h3>
+        <ShareButton elementId="snapshot-weekly-stats" fileName="weekly-stats" title="Top-Level Metrics" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
         <StatCard
           label="Total Spend"
           value={report ? formatINR(report.total_spend) : "—"}
@@ -314,77 +360,167 @@ ${report.bottom_ads.length > 0 ? `⚠️ *Watch:* ${report.bottom_ads[0].ad_name
         </div>
       )}
 
-      {/* Top + Bottom Ads */}
-      <div className="grid grid-cols-2 gap-6 mb-8">
-        {/* Top Ads */}
-        <div className="rounded-2xl bg-white border border-slate-200 p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center border border-emerald-100">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+      {/* Campaign Performance Table */}
+      {report?.campaigns && report.campaigns.length > 0 && (
+        <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm mb-8">
+          <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div>
+              <h3 className="font-semibold text-slate-900">Campaign Performance</h3>
+              <p className="text-xs text-slate-500 mt-1">Rollup by campaign for this week</p>
             </div>
-            <h3 className="font-semibold text-slate-900 text-sm">Top Performing Ads</h3>
+            <ShareButton elementId="snapshot-weekly-campaigns" fileName="weekly-campaigns" title="Campaign Performance" />
           </div>
-          {loading ? (
-            <div className="space-y-3">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="h-14 bg-slate-50 rounded-xl animate-pulse" />
-              ))}
-            </div>
-          ) : (report?.top_ads ?? []).length === 0 ? (
-            <p className="text-slate-400 text-sm">No data yet. Compute report first.</p>
-          ) : (
-            <div className="space-y-3">
-              {(report?.top_ads ?? []).map((ad, i) => (
-                <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
-                  <span className="text-lg font-bold text-emerald-500 w-6 text-center">
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">{ad.ad_name}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      <span className="font-medium text-slate-700">{ad.results} leads</span> · {formatINR(ad.cost_per_result)}/lead
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead>
+                <tr className="border-b border-slate-200 bg-white">
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/30">Campaign</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/30">Spend</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/30">Leads</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50/30">Cost/Lead</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {report.campaigns.map((camp) => (
+                  <tr key={camp.campaign_name} className="group hover:bg-slate-50/70 transition-colors">
+                    <td className="px-5 py-2.5 sticky left-0 bg-white group-hover:bg-slate-50/70 shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 transition-colors">
+                      <p className="font-medium text-slate-900 text-sm max-w-[120px] sm:max-w-[280px] truncate">
+                        {camp.campaign_name}
+                      </p>
+                    </td>
+                    <td className="px-5 py-2.5 font-medium text-slate-700 whitespace-nowrap">
+                      {formatINR(camp.spend)}
+                    </td>
+                    <td className="px-5 py-2.5">
+                      <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${camp.results > 0 ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-slate-100 text-slate-500 border border-slate-200"}`}>
+                        {camp.results}
+                      </span>
+                    </td>
+                    <td className="px-5 py-2.5 font-semibold whitespace-nowrap">
+                      <span className={camp.results === 0 ? "text-slate-400" : "text-slate-900"}>
+                        {camp.results === 0 ? "—" : formatINR(camp.cost_per_result)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
+      )}
 
-        {/* Bottom Ads */}
-        <div className="rounded-2xl bg-white border border-slate-200 p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center border border-amber-100">
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
-            </div>
-            <h3 className="font-semibold text-slate-900 text-sm">Underperforming Ads</h3>
-          </div>
-          {loading ? (
-            <div className="space-y-3">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="h-14 bg-slate-50 rounded-xl animate-pulse" />
-              ))}
-            </div>
-          ) : (report?.bottom_ads ?? []).length === 0 ? (
-            <p className="text-slate-400 text-sm">No underperformers detected.</p>
-          ) : (
-            <div className="space-y-3">
-              {(report?.bottom_ads ?? []).map((ad, i) => (
-                <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
-                  <span className="text-lg font-bold text-amber-500 w-6 text-center">
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">{ad.ad_name}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      <span className="font-medium text-slate-700">{formatINR(ad.spend)} spend</span> · {ad.results} leads
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+      {/* Top + Bottom Ads Section */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-bold text-lg text-slate-800">Ads Performance</h2>
+        <div className="flex gap-4 items-center">
+          <ShareButton elementId="snapshot-weekly-ads" fileName="weekly-ads-performance" title="Ads Performance" />
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+          <button
+            onClick={() => setAdScope("overall")}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              adScope === "overall"
+                ? "bg-white text-slate-900 shadow-sm border border-slate-200/60"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            Overall
+          </button>
+          <button
+            onClick={() => setAdScope("per-campaign")}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              adScope === "per-campaign"
+                ? "bg-white text-slate-900 shadow-sm border border-slate-200/60"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            Per-Campaign
+          </button>
         </div>
+      </div>
+      </div>
+
+      <div className="space-y-8 mb-8">
+        {(adScope === "overall" || !report?.campaigns
+          ? [{ campaign_name: "Overall", top_ads: report?.top_ads ?? [], bottom_ads: report?.bottom_ads ?? [] }]
+          : report.campaigns
+        ).map((group, groupIdx) => (
+          <div key={groupIdx} className="space-y-4">
+            {adScope === "per-campaign" && (
+              <h3 className="text-sm font-semibold text-slate-700 border-b border-slate-200 pb-2">{group.campaign_name}</h3>
+            )}
+            <div className="grid grid-cols-2 gap-6">
+              {/* Top Ads */}
+              <div className="rounded-2xl bg-white border border-slate-200 p-6 shadow-sm">
+                <div className="flex items-center gap-2 mb-5">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center border border-emerald-100">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  </div>
+                  <h3 className="font-semibold text-slate-900 text-sm">Top Performing Ads</h3>
+                </div>
+                {loading ? (
+                  <div className="space-y-3">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="h-14 bg-slate-50 rounded-xl animate-pulse" />
+                    ))}
+                  </div>
+                ) : group.top_ads.length === 0 ? (
+                  <p className="text-slate-400 text-sm">No data yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {group.top_ads.map((ad, i) => (
+                      <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                        <span className="text-lg font-bold text-emerald-500 w-6 text-center">
+                          {i + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">{ad.ad_name}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            <span className="font-medium text-slate-700">{ad.results} leads</span> · {formatINR(ad.cost_per_result)}/lead
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Ads */}
+              <div className="rounded-2xl bg-white border border-slate-200 p-6 shadow-sm">
+                <div className="flex items-center gap-2 mb-5">
+                  <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center border border-amber-100">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  </div>
+                  <h3 className="font-semibold text-slate-900 text-sm">Underperforming Ads</h3>
+                </div>
+                {loading ? (
+                  <div className="space-y-3">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="h-14 bg-slate-50 rounded-xl animate-pulse" />
+                    ))}
+                  </div>
+                ) : group.bottom_ads.length === 0 ? (
+                  <p className="text-slate-400 text-sm">No underperformers detected.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {group.bottom_ads.map((ad, i) => (
+                      <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                        <span className="text-lg font-bold text-amber-500 w-6 text-center">
+                          {i + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">{ad.ad_name}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            <span className="font-medium text-slate-700">{formatINR(ad.spend)} spend</span> · {ad.results} leads
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* 4-Week History Chart */}
@@ -471,6 +607,56 @@ ${report.bottom_ads.length > 0 ? `⚠️ *Watch:* ${report.bottom_ads[0].ad_name
           </ResponsiveContainer>
         )}
       </div>
+
+      {report && (
+        <>
+          <SnapshotStatCards
+            id="snapshot-weekly-stats"
+            title={`Weekly ${isAllProjects ? 'Portfolio' : currentProject} Performance`}
+            subtitle={weekLabel}
+            stats={[
+              { label: "Total Spend", value: formatINR(report.total_spend), icon: "spend" },
+              { label: "Total Leads", value: String(report.total_results), icon: "leads" },
+              { label: "Cost Per Lead", value: formatINR(report.avg_cpa), icon: "cpa" },
+              { label: "Avg CTR", value: `${report.avg_ctr.toFixed(2)}%`, icon: "ctr" },
+            ]}
+          />
+          {report.campaigns && report.campaigns.length > 0 && (
+            <SnapshotTable
+              id="snapshot-weekly-campaigns"
+              title={`Weekly ${isAllProjects ? 'Portfolio' : currentProject} Campaigns`}
+              subtitle={weekLabel}
+              columns={["Campaign", "Spend", "Leads", "Cost/Lead"]}
+              data={report.campaigns}
+              renderRow={(camp, i) => (
+                <tr key={i}>
+                  <td className="px-5 py-2.5 font-medium">{camp.campaign_name}</td>
+                  <td className="px-5 py-2.5">{formatINR(camp.spend)}</td>
+                  <td className="px-5 py-2.5">{camp.results}</td>
+                  <td className="px-5 py-2.5">{formatINR(camp.cost_per_result)}</td>
+                </tr>
+              )}
+            />
+          )}
+          {adScope === "overall" && (report.top_ads.length > 0 || report.bottom_ads.length > 0) && (
+            <SnapshotTable
+              id="snapshot-weekly-ads"
+              title={`Weekly ${isAllProjects ? 'Portfolio' : currentProject} Ads`}
+              subtitle={weekLabel}
+              columns={["Ad", "Performance", "Spend", "Leads"]}
+              data={[...report.top_ads.map(a => ({...a, type: 'top'})), ...report.bottom_ads.map(a => ({...a, type: 'bottom'}))]}
+              renderRow={(ad, i) => (
+                <tr key={i}>
+                  <td className="px-5 py-2.5 font-medium">{ad.ad_name}</td>
+                  <td className="px-5 py-2.5">{ad.type === 'top' ? '✅ Top' : '⚠️ Bottom'}</td>
+                  <td className="px-5 py-2.5">{formatINR(ad.spend)}</td>
+                  <td className="px-5 py-2.5">{ad.results}</td>
+                </tr>
+              )}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }

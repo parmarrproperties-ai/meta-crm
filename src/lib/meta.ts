@@ -6,6 +6,8 @@
 const BASE_URL = "https://graph.facebook.com/v20.0";
 
 export interface MetaAdInsight {
+  account_id: string;
+  account_name: string;
   ad_id: string;
   ad_name: string;
   campaign_id: string;
@@ -28,6 +30,8 @@ interface RawInsightAction {
 }
 
 interface RawInsight {
+  account_id: string;
+  account_name: string;
   ad_id: string;
   ad_name: string;
   campaign_id: string;
@@ -95,6 +99,8 @@ export async function fetchAdInsights(
   }
 
   const fields = [
+    "account_id",
+    "account_name",
     "ad_id",
     "ad_name",
     "campaign_id",
@@ -141,6 +147,8 @@ export async function fetchAdInsights(
         (results > 0 ? spend / results : 0);
 
       allInsights.push({
+        account_id: raw.account_id,
+        account_name: raw.account_name,
         ad_id: raw.ad_id,
         ad_name: raw.ad_name,
         campaign_id: raw.campaign_id,

@@ -50,7 +50,8 @@ export async function POST(req: NextRequest) {
 
       const rows = insights.map((ad) => ({
         snapshot_date: date,
-        account_id: account.id,
+        account_id: ad.account_id || account.id,
+        account_name: ad.account_name,
         project_name: account.name,
         ad_id: ad.ad_id,
         ad_name: ad.ad_name,

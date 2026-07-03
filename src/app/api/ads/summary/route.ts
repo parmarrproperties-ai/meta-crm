@@ -66,8 +66,11 @@ export async function GET(req: NextRequest) {
       const pMap = new Map<string, any>();
       for (const row of todayData ?? []) {
         const p = row.project_name;
-        const existing = pMap.get(p) ?? {
+        const aName = row.account_name ?? p; // Fallback for old records
+        const key = `${p}::${aName}`;
+        const existing = pMap.get(key) ?? {
           project_name: p,
+          account_name: aName,
           spend: 0,
           results: 0,
           impressions: 0,
@@ -77,7 +80,7 @@ export async function GET(req: NextRequest) {
         existing.results += Number(row.results);
         existing.impressions += Number(row.impressions);
         existing.clicks += Number(row.clicks);
-        pMap.set(p, existing);
+        pMap.set(key, existing);
       }
       portfolio = Array.from(pMap.values()).map(p => ({
         ...p,

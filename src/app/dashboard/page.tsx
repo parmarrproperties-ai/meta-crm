@@ -28,6 +28,8 @@ import {
   ChevronsUpDown,
 } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
+import { ShareButton } from "@/components/ShareButton";
+import { SnapshotStatCards, SnapshotTable } from "@/components/snapshots/SnapshotComponents";
 import { useSearchParams } from "next/navigation";
 
 interface AdRow {
@@ -46,6 +48,7 @@ interface AdRow {
 
 interface PortfolioRow {
   project_name: string;
+  account_name?: string;
   spend: number;
   results: number;
   impressions: number;
@@ -101,6 +104,28 @@ function formatNum(n: number, decimals = 2) {
   return n.toFixed(decimals);
 }
 
+function formatDateRangeLabel(range: "today" | "yesterday" | "7d" | "14d" | "30d"): string {
+  const today = new Date();
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" });
+
+  switch (range) {
+    case "today": return `Today · ${fmt(today)}`;
+    case "yesterday": {
+      const y = new Date(today); y.setDate(y.getDate() - 1);
+      return `Yesterday · ${fmt(y)}`;
+    }
+    case "7d": case "14d": case "30d": {
+      const days = range === "7d" ? 7 : range === "14d" ? 14 : 30;
+      const start = new Date(today); start.setDate(start.getDate() - (days - 1));
+      return `${fmt(start)} – ${fmt(today)}`;
+    }
+  }
+}
+
+const trendDaysFor = (range: "today" | "yesterday" | "7d" | "14d" | "30d") =>
+  range === "7d" ? 7 : range === "30d" ? 30 : 14;
+
 function DashboardClient() {
   const searchParams = useSearchParams();
   const currentProject = searchParams.get("project") || "all";
@@ -114,6 +139,7 @@ function DashboardClient() {
   const [sortKey, setSortKey] = useState<SortKey>("spend");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [activeChart, setActiveChart] = useState<"spend" | "results">("spend");
+  const [adScope, setAdScope] = useState<"overall" | "per-campaign">("overall");
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7d" | "14d" | "30d">("today");
   const [activeAdsOnly, setActiveAdsOnly] = useState(false);
   const [activeCampOnly, setActiveCampOnly] = useState(false);
@@ -143,8 +169,9 @@ function DashboardClient() {
 
       const startDate = sd.toISOString().split("T")[0];
       const endDate = ed.toISOString().split("T")[0];
+      const trendDays = trendDaysFor(dateRange);
 
-      const res = await fetch(`/api/ads/summary?project=${encodeURIComponent(currentProject)}&startDate=${startDate}&endDate=${endDate}`);
+      const res = await fetch(`/api/ads/summary?project=${encodeURIComponent(currentProject)}&startDate=${startDate}&endDate=${endDate}&days=${trendDays}`);
       const json = await res.json();
       if (json.summary) setSummary(json.summary);
       if (json.trend) setTrend(json.trend);
@@ -178,19 +205,12 @@ function DashboardClient() {
     }
   };
 
+  const todayLabel = formatDateRangeLabel(dateRange);
+
   const handleNativeShare = async () => {
     if (!summary) return;
-    const text = `📊 *Daily Ads Summary - ${currentProject === "all" ? "Portfolio" : currentProject}*
-${today}
-
-*Total Spend:* ${formatINR(summary.totalSpend)}
-*Total Leads:* ${summary.totalResults}
-*Avg Cost/Lead:* ${formatINR(summary.avgCPA)}
-*Avg CTR:* ${formatNum(summary.avgCTR)}%
-
-${summary.bestAd ? `✅ *Best Ad:* ${summary.bestAd.ad_name} (${formatINR(summary.bestAd.cost_per_result)}/lead)` : ""}
-${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(summary.worstAd.spend)} spend, ${summary.worstAd.results} leads)` : ""}
-`;
+    const { generateDailyWhatsAppText } = await import("@/lib/whatsappFormat");
+    const text = generateDailyWhatsAppText(summary, currentProject, todayLabel);
     
     if (navigator.share) {
       try {
@@ -264,28 +284,6 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
     }
   };
 
-  const filteredCampaigns = (summary?.campaigns ?? []).filter((c) => !activeCampOnly || c.spend > 0 || c.impressions > 0 || c.results > 0);
-  const sortedCampaigns = [...filteredCampaigns].sort((a, b) => {
-    const av = a[campSortKey] as number | string;
-    const bv = b[campSortKey] as number | string;
-    if (typeof av === "number" && typeof bv === "number") {
-      return campSortDir === "asc" ? av - bv : bv - av;
-    }
-    return campSortDir === "asc"
-      ? String(av).localeCompare(String(bv))
-      : String(bv).localeCompare(String(av));
-  });
-
-  const [today, setToday] = useState("");
-  useEffect(() => {
-    setToday(new Date().toLocaleDateString("en-IN", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    }));
-  }, []);
-
   const SortIcon = ({ col, isCamp = false }: { col: string; isCamp?: boolean }) => {
     const sKey = isCamp ? campSortKey : sortKey;
     const sDir = isCamp ? campSortDir : sortDir;
@@ -299,6 +297,20 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
       <ChevronsUpDown className="w-3 h-3 inline ml-1 text-slate-300/50" />
     );
   };
+
+  const filteredCampaigns = (summary?.campaigns ?? []).filter(
+    (c) => !activeCampOnly || c.spend > 0 || c.impressions > 0 || c.results > 0
+  );
+  const sortedCampaigns = [...filteredCampaigns].sort((a, b) => {
+    const av = a[campSortKey] as number | string;
+    const bv = b[campSortKey] as number | string;
+    if (typeof av === "number" && typeof bv === "number") {
+      return campSortDir === "asc" ? av - bv : bv - av;
+    }
+    return campSortDir === "asc"
+      ? String(av).localeCompare(String(bv))
+      : String(bv).localeCompare(String(av));
+  });
 
   const isAllProjects = currentProject === "all";
 
@@ -339,7 +351,7 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
               <option value="30d">Last 30 Days</option>
             </select>
           </h1>
-          <p className="text-slate-500 text-sm mt-1.5 font-medium" suppressHydrationWarning>{today}</p>
+          <p className="text-slate-500 text-sm mt-1.5 font-medium" suppressHydrationWarning>{todayLabel}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
@@ -364,6 +376,10 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
       </div>
 
       {/* Stat Cards */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold text-slate-900">Top-Level Metrics</h3>
+        <ShareButton elementId="snapshot-stat-cards" fileName="top-level-metrics" title="Top-Level Metrics" />
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
         <StatCard
           label="Total Spend"
@@ -400,22 +416,32 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
               <h3 className="font-semibold text-slate-900">Portfolio Breakdown</h3>
               <p className="text-xs text-slate-500 mt-1">Cross-project comparison</p>
             </div>
+            <ShareButton elementId="snapshot-portfolio" fileName="portfolio-breakdown" title="Portfolio Breakdown" />
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/30">
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Project Name</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 text-left uppercase tracking-wider">Project Name</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 text-left uppercase tracking-wider">Account Name</th>
                   <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Spend</th>
                   <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Leads</th>
                   <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cost/Lead</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">CTR</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {portfolio.map((p) => (
-                  <tr key={p.project_name} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-5 py-2.5 font-medium text-slate-900 sticky left-0 bg-white sm:bg-transparent shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10">{p.project_name}</td>
+                  <tr key={`${p.project_name}::${p.account_name}`} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-5 py-2.5 font-medium text-slate-900 sticky left-0 bg-white sm:bg-transparent shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 text-left">
+                      <div className="max-w-[120px] sm:max-w-[200px] truncate">
+                        {p.project_name}
+                      </div>
+                    </td>
+                    <td className="px-5 py-2.5 text-slate-700 text-left">
+                      <div className="max-w-[120px] sm:max-w-[200px] truncate">
+                        {p.account_name}
+                      </div>
+                    </td>
                     <td className="px-5 py-2.5 text-slate-600">{formatINR(p.spend)}</td>
                     <td className="px-5 py-2.5">
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
@@ -423,7 +449,6 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
                       </span>
                     </td>
                     <td className="px-5 py-2.5 font-medium text-slate-900">{formatINR(p.cost_per_result)}</td>
-                    <td className="px-5 py-2.5 text-slate-500">{formatNum(p.ctr)}%</td>
                   </tr>
                 ))}
               </tbody>
@@ -435,7 +460,7 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
       {/* Trend Chart */}
       <div className="rounded-2xl bg-white border border-slate-200 p-6 mb-8 shadow-sm">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="font-semibold text-slate-900">14-Day Performance Trend</h3>
+          <h3 className="font-semibold text-slate-900">Performance Trend (Last {trendDaysFor(dateRange)} Days)</h3>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
             <button
               onClick={() => setActiveChart("spend")}
@@ -520,7 +545,8 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
             <h3 className="font-semibold text-slate-900">Campaign Performance</h3>
             <p className="text-xs text-slate-500 mt-1">Rollup by campaign</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
+            <ShareButton elementId="snapshot-campaigns" fileName="campaign-performance" title="Campaign Performance" />
             <label className="text-sm font-medium text-slate-600 cursor-pointer flex items-center gap-2 select-none">
               <input 
                 type="checkbox" 
@@ -578,7 +604,7 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
                     className="group hover:bg-slate-50/70 transition-colors"
                   >
                     <td className="px-5 py-2.5 sticky left-0 bg-white group-hover:bg-slate-50/70 shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 transition-colors">
-                      <p className="font-medium text-slate-900 text-sm">
+                      <p className="font-medium text-slate-900 text-sm max-w-[120px] sm:max-w-[280px] truncate">
                         {camp.campaign_name}
                       </p>
                     </td>
@@ -626,7 +652,30 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
             <h3 className="font-semibold text-slate-900">Ad Performance</h3>
             <p className="text-xs text-slate-500 mt-1">Click column headers to sort</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
+            <ShareButton elementId="snapshot-ads" fileName="ad-performance" title="Ad Performance" />
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+              <button
+                onClick={() => setAdScope("overall")}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  adScope === "overall"
+                    ? "bg-white text-slate-900 shadow-sm border border-slate-200/60"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                Overall
+              </button>
+              <button
+                onClick={() => setAdScope("per-campaign")}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  adScope === "per-campaign"
+                    ? "bg-white text-slate-900 shadow-sm border border-slate-200/60"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                Per-Campaign
+              </button>
+            </div>
             <label className="text-sm font-medium text-slate-600 cursor-pointer flex items-center gap-2 select-none">
               <input 
                 type="checkbox" 
@@ -680,58 +729,154 @@ ${summary.worstAd ? `⚠️ *Watch:* ${summary.worstAd.ad_name} (${formatINR(sum
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sortedAds.map((ad) => (
-                  <tr
-                    key={ad.ad_id}
-                    className="group hover:bg-slate-50/70 transition-colors"
-                  >
-                    <td className="px-5 py-2.5 sticky left-0 bg-white group-hover:bg-slate-50/70 shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 transition-colors">
-                      <div className="max-w-[280px]">
-                        <p className="font-medium text-slate-900 truncate text-sm">
-                          {ad.ad_name}
-                        </p>
-                        <p className="text-xs text-slate-500 truncate mt-0.5">
-                          {isAllProjects && <span className="font-medium text-blue-600 mr-1">[{ad.project_name}]</span>}
-                          {ad.campaign_name}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-5 py-2.5 font-medium text-slate-700 whitespace-nowrap">
-                      {formatINR(ad.spend)}
-                    </td>
-                    <td className="px-5 py-2.5 text-slate-500 whitespace-nowrap">
-                      {ad.impressions.toLocaleString("en-IN")}
-                    </td>
-                    <td className="px-5 py-2.5 text-slate-500">{ad.clicks.toLocaleString("en-IN")}</td>
-                    <td className="px-5 py-2.5 text-slate-500">{formatNum(ad.ctr)}%</td>
-                    <td className="px-5 py-2.5 text-slate-500">{formatINR(ad.cpc)}</td>
-                    <td className="px-5 py-2.5">
-                      <span
-                        className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${
-                          ad.results > 0
-                            ? "bg-blue-50 text-blue-700 border border-blue-100"
-                            : "bg-slate-100 text-slate-500 border border-slate-200"
-                        }`}
-                      >
-                        {ad.results}
-                      </span>
-                    </td>
-                    <td className="px-5 py-2.5 font-semibold whitespace-nowrap">
-                      <span
-                        className={
-                          ad.results === 0 ? "text-slate-400" : "text-slate-900"
-                        }
-                      >
-                        {ad.results === 0 ? "—" : formatINR(ad.cost_per_result)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {(adScope === "overall" 
+                  ? sortedAds 
+                  : Array.from(new Set(sortedAds.map(a => a.campaign_name)))
+                      .map(campName => {
+                        const campAds = sortedAds.filter(a => a.campaign_name === campName);
+                        const campSpend = campAds.reduce((sum, a) => sum + a.spend, 0);
+                        return { campName, campAds, campSpend };
+                      })
+                      .sort((a, b) => b.campSpend - a.campSpend)
+                      .flatMap(({ campName, campAds }) => [
+                        { isHeader: true, title: campName, id: `header-${campName}` },
+                        ...campAds
+                      ])
+                ).map((item: any) => {
+                  if (item.isHeader) {
+                    return (
+                      <tr key={item.id} className="bg-slate-50/80">
+                        <td colSpan={8} className="px-5 py-2 font-bold text-slate-700 text-xs uppercase tracking-wider">
+                          {item.title}
+                        </td>
+                      </tr>
+                    );
+                  }
+                  
+                  const ad = item;
+                  return (
+                    <tr
+                      key={ad.ad_id}
+                      className="group hover:bg-slate-50/70 transition-colors"
+                    >
+                      <td className="px-5 py-2.5 sticky left-0 bg-white group-hover:bg-slate-50/70 shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 transition-colors">
+                        <div className="max-w-[120px] sm:max-w-[280px]">
+                          <p className="font-medium text-slate-900 truncate text-sm">
+                            {ad.ad_name}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate mt-0.5">
+                            {isAllProjects && <span className="font-medium text-blue-600 mr-1">[{ad.project_name}]</span>}
+                            {ad.campaign_name}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="px-5 py-2.5 font-medium text-slate-700 whitespace-nowrap">
+                        {formatINR(ad.spend)}
+                      </td>
+                      <td className="px-5 py-2.5 text-slate-500 whitespace-nowrap">
+                        {ad.impressions.toLocaleString("en-IN")}
+                      </td>
+                      <td className="px-5 py-2.5 text-slate-500">{ad.clicks.toLocaleString("en-IN")}</td>
+                      <td className="px-5 py-2.5 text-slate-500">{formatNum(ad.ctr)}%</td>
+                      <td className="px-5 py-2.5 text-slate-500">{formatINR(ad.cpc)}</td>
+                      <td className="px-5 py-2.5">
+                        <span
+                          className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${
+                            ad.results > 0
+                              ? "bg-blue-50 text-blue-700 border border-blue-100"
+                              : "bg-slate-100 text-slate-500 border border-slate-200"
+                          }`}
+                        >
+                          {ad.results}
+                        </span>
+                      </td>
+                      <td className="px-5 py-2.5 font-semibold whitespace-nowrap">
+                        <span
+                          className={
+                            ad.results === 0 ? "text-slate-400" : "text-slate-900"
+                          }
+                        >
+                          {ad.results === 0 ? "—" : formatINR(ad.cost_per_result)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
       </div>
+      {summary && (
+        <>
+          <SnapshotStatCards
+            id="snapshot-stat-cards"
+            title={`${isAllProjects ? 'Portfolio' : currentProject} Performance`}
+            subtitle={todayLabel}
+            stats={[
+              { label: "Total Spend", value: formatINR(summary.totalSpend), icon: "spend" },
+              { label: "Total Leads", value: String(summary.totalResults), icon: "leads" },
+              { label: "Cost Per Lead", value: formatINR(summary.avgCPA), icon: "cpa" },
+              { label: "Avg CTR", value: `${formatNum(summary.avgCTR)}%`, icon: "ctr" },
+            ]}
+          />
+          {isAllProjects && portfolio.length > 0 && (
+            <SnapshotTable
+              id="snapshot-portfolio"
+              title="Portfolio Breakdown"
+              subtitle={todayLabel}
+              columns={["Project Name", "Account Name", "Spend", "Leads", "Cost/Lead"]}
+              data={portfolio}
+              renderRow={(p, i) => (
+                <tr key={i}>
+                  <td className="px-5 py-2.5 font-medium">{p.project_name}</td>
+                  <td className="px-5 py-2.5">{p.account_name}</td>
+                  <td className="px-5 py-2.5">{formatINR(p.spend)}</td>
+                  <td className="px-5 py-2.5">{p.results}</td>
+                  <td className="px-5 py-2.5">{formatINR(p.cost_per_result)}</td>
+                </tr>
+              )}
+            />
+          )}
+          {!isAllProjects && sortedCampaigns.length > 0 && (
+            <SnapshotTable
+              id="snapshot-campaigns"
+              title={`${currentProject} Campaigns`}
+              subtitle={todayLabel}
+              columns={["Campaign", "Spend", "Leads", "Cost/Lead"]}
+              data={sortedCampaigns}
+              renderRow={(camp, i) => (
+                <tr key={i}>
+                  <td className="px-5 py-2.5 font-medium">{camp.campaign_name}</td>
+                  <td className="px-5 py-2.5">{formatINR(camp.spend)}</td>
+                  <td className="px-5 py-2.5">{camp.results}</td>
+                  <td className="px-5 py-2.5">{formatINR(camp.cost_per_result)}</td>
+                </tr>
+              )}
+            />
+          )}
+          {!isAllProjects && sortedAds.length > 0 && (
+            <SnapshotTable
+              id="snapshot-ads"
+              title={`${currentProject} Ads`}
+              subtitle={todayLabel}
+              columns={["Ad & Campaign", "Spend", "Leads", "Cost/Lead"]}
+              data={sortedAds}
+              renderRow={(ad, i) => (
+                <tr key={i}>
+                  <td className="px-5 py-2.5">
+                    <p className="font-medium text-slate-900">{ad.ad_name}</p>
+                    <p className="text-xs text-slate-500">{ad.campaign_name}</p>
+                  </td>
+                  <td className="px-5 py-2.5">{formatINR(ad.spend)}</td>
+                  <td className="px-5 py-2.5">{ad.results}</td>
+                  <td className="px-5 py-2.5">{formatINR(ad.cost_per_result)}</td>
+                </tr>
+              )}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }

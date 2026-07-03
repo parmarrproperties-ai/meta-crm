@@ -3,6 +3,12 @@
  * Deterministic number-crunching — no API calls, no side effects.
  */
 
+export function addDays(date: string, days: number): string {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0];
+}
+
 export interface AdSnapshot {
   ad_id: string;
   ad_name: string;
@@ -17,6 +23,11 @@ export interface AdSnapshot {
   results: number;
   cost_per_result: number;
   snapshot_date?: string;
+  campaign_id?: string;
+}
+
+export function formatNum(n: number, decimals = 2) {
+  return n.toFixed(decimals);
 }
 
 export interface DailySummary {
@@ -56,6 +67,14 @@ export interface WeeklySummary {
   resultsChangePct: number | null;
   topAds: AdSnapshot[];
   bottomAds: AdSnapshot[];
+  campaigns: Array<{
+    campaign_name: string;
+    spend: number;
+    results: number;
+    cost_per_result: number;
+    top_ads: AdSnapshot[];
+    bottom_ads: AdSnapshot[];
+  }>;
 }
 
 /** Threshold: ad is flagged as "wasted spend" if spend > this and 0 results */
@@ -254,6 +273,47 @@ export function computeWeeklySummary(
     })
     .slice(0, 3);
 
+  // Campaign breakdown
+  const campMap = new Map<string, { spend: number; results: number; ads: AdSnapshot[] }>();
+  for (const a of aggregatedAds) {
+    const camp = a.campaign_name || "Unknown";
+    const existing = campMap.get(camp);
+    if (existing) {
+      existing.spend += a.spend;
+      existing.results += a.results;
+      existing.ads.push(a);
+    } else {
+      campMap.set(camp, { spend: a.spend, results: a.results, ads: [a] });
+    }
+  }
+
+  const campaigns = Array.from(campMap.entries()).map(([name, data]) => {
+    const campTopAds = [...data.ads]
+      .filter((a) => a.results > 0)
+      .sort((a, b) => {
+        if (b.results !== a.results) return b.results - a.results;
+        return a.cost_per_result - b.cost_per_result;
+      })
+      .slice(0, 3);
+
+    const campBottomAds = [...data.ads]
+      .filter((a) => a.spend > WASTE_SPEND_THRESHOLD)
+      .sort((a, b) => {
+        if (a.results !== b.results) return a.results - b.results;
+        return b.spend - a.spend;
+      })
+      .slice(0, 3);
+
+    return {
+      campaign_name: name,
+      spend: data.spend,
+      results: data.results,
+      cost_per_result: data.results > 0 ? data.spend / data.results : 0,
+      top_ads: campTopAds,
+      bottom_ads: campBottomAds,
+    };
+  }).sort((a, b) => b.spend - a.spend);
+
   return {
     weekStart,
     weekEnd,
@@ -266,6 +326,7 @@ export function computeWeeklySummary(
     resultsChangePct: round2(pctChange(thisResults, lastResults)),
     topAds,
     bottomAds,
+    campaigns,
   };
 }
 

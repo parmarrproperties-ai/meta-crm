@@ -9,8 +9,13 @@ import {
   RefreshCw,
   TrendingUp,
   Zap,
-  ChevronDown
+  ChevronDown,
+  Building2,
+  LayoutGrid,
+  Check,
+  X
 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
 
 const navItems = [
   {
@@ -25,7 +30,6 @@ const navItems = [
   },
 ];
 
-import { X } from "lucide-react";
 
 export function Sidebar({ 
   projects = [],
@@ -41,8 +45,20 @@ export function Sidebar({
   const searchParams = useSearchParams();
   const currentProject = searchParams.get("project") || "all";
 
-  const handleProjectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleProjectSelect = (val: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (val === "all") {
       params.delete("project");
@@ -50,7 +66,7 @@ export function Sidebar({
       params.set("project", val);
     }
     router.push(`${pathname}?${params.toString()}`);
-    // Close sidebar on mobile after selection
+    setDropdownOpen(false);
     onClose();
   };
 
@@ -82,20 +98,64 @@ export function Sidebar({
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">
           Active Portfolio
         </p>
-        <div className="relative">
-          <select
-            value={currentProject}
-            onChange={handleProjectChange}
-            className="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg px-3 py-2.5 pr-8 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer hover:bg-slate-100"
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+            className="w-full bg-white border border-slate-200 hover:border-blue-400 hover:bg-slate-50 transition-all rounded-xl p-3 flex items-center justify-between shadow-sm group focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           >
-            <option value="all">All Projects (Portfolio)</option>
-            {projects.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 group-hover:bg-white group-hover:shadow-sm transition-all">
+                {currentProject === "all" ? (
+                  <LayoutGrid className="w-4 h-4 text-blue-500" />
+                ) : (
+                  <Building2 className="w-4 h-4 text-indigo-500" />
+                )}
+              </div>
+              <span className="text-sm font-semibold text-slate-800 truncate">
+                {currentProject === "all" ? "Portfolio Overview" : currentProject}
+              </span>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {dropdownOpen && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden py-1 max-h-[300px] overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+              <button
+                onClick={() => handleProjectSelect("all")}
+                className={`w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors ${currentProject === "all" ? "bg-blue-50/50" : ""}`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                  </div>
+                  <span className={`text-sm ${currentProject === "all" ? "font-semibold text-blue-700" : "font-medium text-slate-700"}`}>
+                    Portfolio Overview
+                  </span>
+                </div>
+                {currentProject === "all" && <Check className="w-4 h-4 text-blue-600" />}
+              </button>
+              
+              <div className="h-px bg-slate-100 my-1 mx-3" />
+              
+              {projects.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => handleProjectSelect(p)}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors ${currentProject === p ? "bg-indigo-50/50" : ""}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                      <Building2 className="w-3.5 h-3.5" />
+                    </div>
+                    <span className={`text-sm truncate max-w-[140px] ${currentProject === p ? "font-semibold text-indigo-700" : "font-medium text-slate-700"}`}>
+                      {p}
+                    </span>
+                  </div>
+                  {currentProject === p && <Check className="w-4 h-4 text-indigo-600" />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

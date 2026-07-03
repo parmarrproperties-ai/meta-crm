@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     if (project && project !== "all") {
       query = query.eq("project_name", project);
     } else {
-      query = query.is("project_name", null); // Assuming overall portfolio rows have project_name = null
+      query = query.eq("project_name", "Portfolio");
     }
 
     if (weekStart) {
@@ -43,17 +43,18 @@ export async function GET(req: NextRequest) {
 
     const report = reportData?.[0] ?? null;
 
-    // Fetch last 4 weeks of history for chart
+    // Fetch last 4 weeks of history for chart (anchored to requested week or now)
     let historyQuery = supabase
       .from("weekly_reports")
       .select("week_start, total_spend, total_results, avg_cpa")
-      .order("week_start", { ascending: true })
+      .lte("week_start", weekStart ?? new Date().toISOString().split("T")[0])
+      .order("week_start", { ascending: false })
       .limit(4);
 
     if (project && project !== "all") {
       historyQuery = historyQuery.eq("project_name", project);
     } else {
-      historyQuery = historyQuery.is("project_name", null);
+      historyQuery = historyQuery.eq("project_name", "Portfolio");
     }
 
     const { data: historyData, error: historyError } = await historyQuery;
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       report,
-      history: historyData ?? [],
+      history: (historyData ?? []).slice().reverse(),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

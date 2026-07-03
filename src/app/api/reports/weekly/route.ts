@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { computeWeeklySummary, type AdSnapshot } from "@/lib/compute";
+import { computeWeeklySummary, addDays, type AdSnapshot } from "@/lib/compute";
 import { generateWeeklyNarrative } from "@/lib/claude";
 
 function getMostRecentWeekBounds(): { weekStart: string; weekEnd: string } {
@@ -28,12 +28,6 @@ function getMostRecentWeekBounds(): { weekStart: string; weekEnd: string } {
     weekStart: lastMonday.toISOString().split("T")[0],
     weekEnd: lastSunday.toISOString().split("T")[0],
   };
-}
-
-function addDays(date: string, days: number): string {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
 }
 
 function verifyCronSecret(req: NextRequest): boolean {
@@ -158,16 +152,15 @@ export async function POST(req: NextRequest) {
           results_change_pct: summary.resultsChangePct,
           top_ads: summary.topAds,
           bottom_ads: summary.bottomAds,
+          campaigns: summary.campaigns,
           ai_summary: aiSummary,
         },
-        { onConflict: "week_start,project_name" }
+        { onConflict: "week_start, project_name" }
       );
 
     if (upsertError) {
-      return NextResponse.json(
-        { error: upsertError.message },
-        { status: 500 }
-      );
+      console.error("[weekly-report] upsert error:", upsertError.message);
+      return NextResponse.json({ error: upsertError.message }, { status: 500 });
     }
 
     return NextResponse.json({
