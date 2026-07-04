@@ -318,7 +318,7 @@ function DashboardClient() {
   const isAllProjects = currentProject === "all";
 
   return (
-    <div className="p-8 min-h-screen pb-20">
+    <div className="p-4 sm:p-8 min-h-screen pb-20">
       {/* Toast */}
       {toast && (
         <div
@@ -346,14 +346,14 @@ function DashboardClient() {
           <p className="text-slate-500 text-sm mt-1.5 font-medium" suppressHydrationWarning>{todayLabel}</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
-          <div className="relative flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+          <div className="relative flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
             {dateRange !== "custom" && (
-              <div className="relative">
+              <div className="relative w-full sm:w-auto">
                 <select
                   value={dateRange}
                   onChange={(e) => setDateRange(e.target.value as any)}
-                  className="appearance-none pl-9 pr-8 py-2.5 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer shadow-sm"
+                  className="appearance-none w-full sm:w-auto pl-9 pr-8 py-2.5 sm:py-2 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer shadow-sm h-[44px] sm:h-auto"
                 >
                   <option value="today">Today</option>
                   <option value="yesterday">Yesterday</option>
@@ -368,23 +368,23 @@ function DashboardClient() {
             )}
 
             {dateRange === "custom" && (
-              <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 bg-white border border-slate-200 rounded-xl p-1 sm:p-1 shadow-sm w-full sm:w-auto h-auto min-h-[44px]">
                 <input 
                   type="date" 
                   value={customStartDate} 
                   onChange={e => setCustomStartDate(e.target.value)}
-                  className="text-sm px-2 py-1 bg-transparent text-slate-700 outline-none" 
+                  className="flex-1 text-sm px-2 py-1.5 sm:py-1 bg-transparent text-slate-700 outline-none min-w-[120px]" 
                 />
-                <span className="text-slate-400 text-sm">to</span>
+                <span className="text-slate-400 text-sm px-1">to</span>
                 <input 
                   type="date" 
                   value={customEndDate} 
                   onChange={e => setCustomEndDate(e.target.value)}
-                  className="text-sm px-2 py-1 bg-transparent text-slate-700 outline-none" 
+                  className="flex-1 text-sm px-2 py-1.5 sm:py-1 bg-transparent text-slate-700 outline-none min-w-[120px]" 
                 />
                 <button 
                   onClick={() => setDateRange("today")} 
-                  className="px-2 py-1 text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+                  className="w-full sm:w-auto px-2 py-2 sm:py-1 text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors border-t border-slate-100 sm:border-0"
                 >
                   Cancel
                 </button>
@@ -394,31 +394,34 @@ function DashboardClient() {
             {dateRange !== "custom" && (
               <button
                 onClick={() => setDateRange("custom")}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 shadow-sm"
+                className="w-full sm:w-auto flex justify-center items-center gap-2 px-3 py-2.5 sm:py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 shadow-sm h-[44px] sm:h-auto"
               >
                 <Calendar className="w-4 h-4 text-slate-500" />
+                <span className="inline sm:hidden">Custom Date Range</span>
                 <span className="hidden sm:inline">Custom</span>
               </button>
             )}
           </div>
 
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline">{refreshing ? "Syncing..." : "Sync Now"}</span>
-          </button>
+          <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm h-[44px] sm:h-auto"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+              <span className="inline">{refreshing ? "Syncing..." : "Sync Now"}</span>
+            </button>
 
-          <button
-            onClick={handleNativeShare}
-            disabled={!summary}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-sm font-medium text-white transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-600/20"
-          >
-            <Share2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Share Report (S)</span>
-          </button>
+            <button
+              onClick={handleNativeShare}
+              disabled={!summary}
+              className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-sm font-medium text-white transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-600/20 h-[44px] sm:h-auto"
+            >
+              <Share2 className="w-4 h-4" />
+              <span className="inline">Share<span className="hidden sm:inline"> Report (S)</span></span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -466,9 +469,9 @@ function DashboardClient() {
             </div>
             <ShareButton elementId="snapshot-portfolio" fileName="portfolio-breakdown" title="Portfolio Breakdown" />
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto sm:overflow-visible">
             <table className="w-full text-sm text-left">
-              <thead>
+              <thead className="hidden sm:table-header-group">
                 <tr className="border-b border-slate-100 bg-slate-50/30">
                   <th className="px-5 py-3 text-xs font-semibold text-slate-500 text-left uppercase tracking-wider">Project Name</th>
                   <th className="px-5 py-3 text-xs font-semibold text-slate-500 text-left uppercase tracking-wider">Account Name</th>
@@ -477,26 +480,35 @@ function DashboardClient() {
                   <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cost/Lead</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 sm:divide-y sm:divide-slate-100 space-y-4 sm:space-y-0 p-4 sm:p-0 flex flex-col sm:table-row-group bg-slate-50/50 sm:bg-transparent">
                 {portfolio.map((p) => (
-                  <tr key={`${p.project_name}::${p.account_name}`} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-5 py-2.5 font-medium text-slate-900 sticky left-0 bg-white sm:bg-transparent shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 text-left">
-                      <div className="max-w-[120px] sm:max-w-[200px] truncate">
+                  <tr key={`${p.project_name}::${p.account_name}`} className="flex flex-col sm:table-row bg-white rounded-xl border border-slate-200 sm:border-0 sm:bg-transparent shadow-sm sm:shadow-none hover:bg-slate-50/50 transition-colors p-1 sm:p-0">
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-medium text-slate-900 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Project</span>
+                      <div className="max-w-[150px] sm:max-w-[200px] truncate text-right sm:text-left">
                         {p.project_name}
                       </div>
                     </td>
-                    <td className="px-5 py-2.5 text-slate-700 text-left">
-                      <div className="max-w-[120px] sm:max-w-[200px] truncate">
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-700 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Account</span>
+                      <div className="max-w-[150px] sm:max-w-[200px] truncate text-right sm:text-left">
                         {p.account_name}
                       </div>
                     </td>
-                    <td className="px-5 py-2.5 text-slate-600">{formatINR(p.spend)}</td>
-                    <td className="px-5 py-2.5">
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-600 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Spend</span>
+                      {formatINR(p.spend)}
+                    </td>
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Leads</span>
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
                         {p.results}
                       </span>
                     </td>
-                    <td className="px-5 py-2.5 font-medium text-slate-900">{formatINR(p.cost_per_result)}</td>
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-medium text-slate-900 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Cost/Lead</span>
+                      {formatINR(p.cost_per_result)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -623,7 +635,7 @@ function DashboardClient() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto sm:overflow-visible">
           {loading ? (
             <div className="p-6 space-y-3">
               {[...Array(3)].map((_, i) => (
@@ -636,7 +648,7 @@ function DashboardClient() {
             </div>
           ) : (
             <table className="w-full text-sm text-left">
-              <thead>
+              <thead className="hidden sm:table-header-group">
                 <tr className="border-b border-slate-200 bg-white">
                   {(
                     [
@@ -661,27 +673,40 @@ function DashboardClient() {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 sm:divide-y sm:divide-slate-100 space-y-4 sm:space-y-0 p-4 sm:p-0 flex flex-col sm:table-row-group bg-slate-50/50 sm:bg-transparent">
                 {sortedCampaigns.map((camp) => (
                   <tr
                     key={camp.campaign_name}
-                    className="group hover:bg-slate-50/70 transition-colors"
+                    className="flex flex-col sm:table-row bg-white rounded-xl border border-slate-200 sm:border-0 sm:bg-transparent shadow-sm sm:shadow-none hover:bg-slate-50/50 transition-colors p-1 sm:p-0 group"
                   >
-                    <td className="px-5 py-2.5 sticky left-0 bg-white group-hover:bg-slate-50/70 shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 transition-colors">
-                      <p className="font-medium text-slate-900 text-sm max-w-[120px] sm:max-w-[280px] truncate">
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell group-hover:bg-slate-50/70 transition-colors sticky sm:static left-0 bg-white z-10">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Campaign</span>
+                      <p className="font-medium text-slate-900 text-sm max-w-[150px] sm:max-w-[280px] truncate text-right sm:text-left">
                         {camp.campaign_name}
                       </p>
                     </td>
-                    <td className="px-5 py-2.5 font-medium text-slate-700 whitespace-nowrap">
-                      {formatINR(camp.spend)}
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-medium text-slate-700 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Spend</span>
+                      <span className="font-medium text-slate-700">{formatINR(camp.spend)}</span>
                     </td>
-                    <td className="px-5 py-2.5 text-slate-500 whitespace-nowrap">
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Impr.</span>
                       {camp.impressions.toLocaleString("en-IN")}
                     </td>
-                    <td className="px-5 py-2.5 text-slate-500">{camp.clicks.toLocaleString("en-IN")}</td>
-                    <td className="px-5 py-2.5 text-slate-500">{formatNum(camp.ctr)}%</td>
-                    <td className="px-5 py-2.5 text-slate-500">{formatINR(camp.cpc)}</td>
-                    <td className="px-5 py-2.5">
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Clicks</span>
+                      {camp.clicks.toLocaleString("en-IN")}
+                    </td>
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">CTR</span>
+                      {formatNum(camp.ctr)}%
+                    </td>
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">CPC</span>
+                      {formatINR(camp.cpc)}
+                    </td>
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Leads</span>
                       <span
                         className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${
                           camp.results > 0
@@ -692,7 +717,8 @@ function DashboardClient() {
                         {camp.results}
                       </span>
                     </td>
-                    <td className="px-5 py-2.5 font-semibold whitespace-nowrap">
+                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-semibold border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
+                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Cost/Lead</span>
                       <span
                         className={
                           camp.results === 0 ? "text-slate-400" : "text-slate-900"
@@ -752,7 +778,7 @@ function DashboardClient() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto sm:overflow-visible">
           {loading ? (
             <div className="p-6 space-y-3">
               {[...Array(5)].map((_, i) => (
@@ -767,7 +793,7 @@ function DashboardClient() {
             </div>
           ) : (
             <table className="w-full text-sm text-left">
-              <thead>
+              <thead className="hidden sm:table-header-group">
                 <tr className="border-b border-slate-200 bg-white">
                   {(
                     [
@@ -792,7 +818,7 @@ function DashboardClient() {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 sm:divide-y sm:divide-slate-100 space-y-4 sm:space-y-0 p-4 sm:p-0 flex flex-col sm:table-row-group bg-slate-50/50 sm:bg-transparent">
                 {(adScope === "overall" 
                   ? sortedAds 
                   : Array.from(new Set(sortedAds.map(a => a.campaign_name)))
@@ -809,8 +835,8 @@ function DashboardClient() {
                 ).map((item: any) => {
                   if (item.isHeader) {
                     return (
-                      <tr key={item.id} className="bg-slate-50/80">
-                        <td colSpan={8} className="px-5 py-2 font-bold text-slate-700 text-xs uppercase tracking-wider">
+                      <tr key={item.id} className="bg-slate-50/80 rounded-xl sm:rounded-none">
+                        <td colSpan={8} className="px-4 py-3 sm:px-5 sm:py-2 font-bold text-slate-700 text-xs uppercase tracking-wider block sm:table-cell">
                           {item.title}
                         </td>
                       </tr>
@@ -821,10 +847,11 @@ function DashboardClient() {
                   return (
                     <tr
                       key={ad.ad_id}
-                      className="group hover:bg-slate-50/70 transition-colors"
+                      className="flex flex-col sm:table-row bg-white rounded-xl border border-slate-200 sm:border-0 sm:bg-transparent shadow-sm sm:shadow-none hover:bg-slate-50/50 transition-colors p-1 sm:p-0 group"
                     >
-                      <td className="px-5 py-2.5 sticky left-0 bg-white group-hover:bg-slate-50/70 shadow-[4px_0_12px_rgba(0,0,0,0.03)] sm:shadow-none z-10 transition-colors">
-                        <div className="max-w-[120px] sm:max-w-[280px]">
+                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-start sm:items-center sm:table-cell group-hover:bg-slate-50/70 transition-colors sticky sm:static left-0 bg-white z-10">
+                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase mt-0.5">Ad / Camp</span>
+                        <div className="max-w-[200px] sm:max-w-[280px] text-right sm:text-left">
                           <p className="font-medium text-slate-900 truncate text-sm">
                             {ad.ad_name}
                           </p>
@@ -834,16 +861,28 @@ function DashboardClient() {
                           </p>
                         </div>
                       </td>
-                      <td className="px-5 py-2.5 font-medium text-slate-700 whitespace-nowrap">
-                        {formatINR(ad.spend)}
+                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-medium text-slate-700 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
+                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Spend</span>
+                        <span className="font-medium text-slate-700">{formatINR(ad.spend)}</span>
                       </td>
-                      <td className="px-5 py-2.5 text-slate-500 whitespace-nowrap">
+                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
+                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Impr.</span>
                         {ad.impressions.toLocaleString("en-IN")}
                       </td>
-                      <td className="px-5 py-2.5 text-slate-500">{ad.clicks.toLocaleString("en-IN")}</td>
-                      <td className="px-5 py-2.5 text-slate-500">{formatNum(ad.ctr)}%</td>
-                      <td className="px-5 py-2.5 text-slate-500">{formatINR(ad.cpc)}</td>
-                      <td className="px-5 py-2.5">
+                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Clicks</span>
+                        {ad.clicks.toLocaleString("en-IN")}
+                      </td>
+                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">CTR</span>
+                        {formatNum(ad.ctr)}%
+                      </td>
+                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">CPC</span>
+                        {formatINR(ad.cpc)}
+                      </td>
+                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
+                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Leads</span>
                         <span
                           className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${
                             ad.results > 0
@@ -854,7 +893,8 @@ function DashboardClient() {
                           {ad.results}
                         </span>
                       </td>
-                      <td className="px-5 py-2.5 font-semibold whitespace-nowrap">
+                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-semibold border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
+                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Cost/Lead</span>
                         <span
                           className={
                             ad.results === 0 ? "text-slate-400" : "text-slate-900"
