@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, Suspense, useMemo } from "react";
 import {
   LineChart,
   Line,
@@ -26,25 +26,13 @@ import {
   Minus,
   Share2,
   ChevronsUpDown,
+  Calendar,
 } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { ShareButton } from "@/components/ShareButton";
 import { SnapshotStatCards, SnapshotTable } from "@/components/snapshots/SnapshotComponents";
+import { computeDailySummary, type AdSnapshot as AdRow, type DailySummary } from "@/lib/compute";
 import { useSearchParams } from "next/navigation";
-
-interface AdRow {
-  ad_id: string;
-  ad_name: string;
-  campaign_name: string;
-  spend: number;
-  impressions: number;
-  clicks: number;
-  ctr: number;
-  cpc: number;
-  results: number;
-  cost_per_result: number;
-  project_name?: string;
-}
 
 interface PortfolioRow {
   project_name: string;
@@ -55,31 +43,6 @@ interface PortfolioRow {
   clicks: number;
   cost_per_result: number;
   ctr: number;
-}
-
-interface DailySummary {
-  date: string;
-  totalSpend: number;
-  totalImpressions: number;
-  totalClicks: number;
-  totalResults: number;
-  avgCTR: number;
-  avgCPC: number;
-  avgCPM: number;
-  avgCPA: number;
-  bestAd: AdRow | null;
-  worstAd: AdRow | null;
-  ads: AdRow[];
-  campaigns: Array<{
-    campaign_name: string;
-    spend: number;
-    impressions: number;
-    clicks: number;
-    results: number;
-    cost_per_result: number;
-    ctr: number;
-    cpc: number;
-  }>;
 }
 
 interface TrendPoint {
@@ -104,7 +67,7 @@ function formatNum(n: number, decimals = 2) {
   return n.toFixed(decimals);
 }
 
-function formatDateRangeLabel(range: "today" | "yesterday" | "7d" | "14d" | "30d"): string {
+function formatDateRangeLabel(range: string, sd?: string, ed?: string): string {
   const today = new Date();
   const fmt = (d: Date) =>
     d.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" });
@@ -115,7 +78,16 @@ function formatDateRangeLabel(range: "today" | "yesterday" | "7d" | "14d" | "30d
       const y = new Date(today); y.setDate(y.getDate() - 1);
       return `Yesterday · ${fmt(y)}`;
     }
-    case "7d": case "14d": case "30d": {
+    case "last_month": {
+      const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const end = new Date(today.getFullYear(), today.getMonth(), 0);
+      return `${fmt(start)} – ${fmt(end)}`;
+    }
+    case "custom": {
+      if (sd && ed) return `${fmt(new Date(sd))} – ${fmt(new Date(ed))}`;
+      return "Custom Range";
+    }
+    case "7d": case "14d": case "30d": default: {
       const days = range === "7d" ? 7 : range === "14d" ? 14 : 30;
       const start = new Date(today); start.setDate(start.getDate() - (days - 1));
       return `${fmt(start)} – ${fmt(today)}`;
@@ -123,8 +95,15 @@ function formatDateRangeLabel(range: "today" | "yesterday" | "7d" | "14d" | "30d
   }
 }
 
-const trendDaysFor = (range: "today" | "yesterday" | "7d" | "14d" | "30d") =>
-  range === "7d" ? 7 : range === "30d" ? 30 : 14;
+const trendDaysFor = (range: string, sd?: string, ed?: string) => {
+  if (range === "7d") return 7;
+  if (range === "last_month" || range === "30d") return 30;
+  if (range === "custom" && sd && ed) {
+    const diff = new Date(ed).getTime() - new Date(sd).getTime();
+    return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1);
+  }
+  return 14;
+}
 
 function DashboardClient() {
   const searchParams = useSearchParams();
@@ -140,9 +119,25 @@ function DashboardClient() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [activeChart, setActiveChart] = useState<"spend" | "results">("spend");
   const [adScope, setAdScope] = useState<"overall" | "per-campaign">("overall");
-  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7d" | "14d" | "30d">("today");
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7d" | "14d" | "30d" | "last_month" | "custom">("today");
+  const [customStartDate, setCustomStartDate] = useState<string>("");
+  const [customEndDate, setCustomEndDate] = useState<string>("");
   const [activeAdsOnly, setActiveAdsOnly] = useState(false);
   const [activeCampOnly, setActiveCampOnly] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState<string>("all");
+
+  const availableCampaigns = useMemo(() => {
+    if (!summary) return [];
+    const camps = summary.ads.map((ad) => ad.campaign_name).filter(Boolean);
+    return Array.from(new Set(camps)).sort();
+  }, [summary]);
+
+  const displayedSummary = useMemo(() => {
+    if (!summary) return null;
+    if (selectedCampaign === "all") return summary;
+    const filteredAds = summary.ads.filter((ad) => ad.campaign_name === selectedCampaign);
+    return computeDailySummary(filteredAds, summary.date);
+  }, [summary, selectedCampaign]);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -163,13 +158,21 @@ function DashboardClient() {
         sd.setDate(sd.getDate() - 6);
       } else if (dateRange === "14d") {
         sd.setDate(sd.getDate() - 13);
+      } else if (dateRange === "last_month") {
+        sd = new Date(sd.getFullYear(), sd.getMonth() - 1, 1);
+        ed = new Date(sd.getFullYear(), sd.getMonth(), 0);
+      } else if (dateRange === "custom") {
+        if (customStartDate && customEndDate) {
+          sd = new Date(customStartDate);
+          ed = new Date(customEndDate);
+        }
       } else if (dateRange === "30d") {
         sd.setDate(sd.getDate() - 29);
       }
 
       const startDate = sd.toISOString().split("T")[0];
       const endDate = ed.toISOString().split("T")[0];
-      const trendDays = trendDaysFor(dateRange);
+      const trendDays = trendDaysFor(dateRange, customStartDate, customEndDate);
 
       const res = await fetch(`/api/ads/summary?project=${encodeURIComponent(currentProject)}&startDate=${startDate}&endDate=${endDate}&days=${trendDays}`);
       const json = await res.json();
@@ -181,7 +184,7 @@ function DashboardClient() {
     } finally {
       setLoading(false);
     }
-  }, [currentProject, dateRange]);
+  }, [currentProject, dateRange, customStartDate, customEndDate]);
 
   useEffect(() => {
     loadData();
@@ -205,12 +208,12 @@ function DashboardClient() {
     }
   };
 
-  const todayLabel = formatDateRangeLabel(dateRange);
+  const todayLabel = formatDateRangeLabel(dateRange, customStartDate, customEndDate);
 
   const handleNativeShare = async () => {
-    if (!summary) return;
+    if (!displayedSummary) return;
     const { generateDailyWhatsAppText } = await import("@/lib/whatsappFormat");
-    const text = generateDailyWhatsAppText(summary, currentProject, todayLabel);
+    const text = generateDailyWhatsAppText(displayedSummary, currentProject, todayLabel);
     
     if (navigator.share) {
       try {
@@ -260,7 +263,7 @@ function DashboardClient() {
     }
   };
 
-  const filteredAds = (summary?.ads ?? []).filter((a) => !activeAdsOnly || a.spend > 0 || a.impressions > 0 || a.results > 0);
+  const filteredAds = (displayedSummary?.ads ?? []).filter((a) => !activeAdsOnly || a.spend > 0 || a.impressions > 0 || a.results > 0);
   const sortedAds = [...filteredAds].sort((a, b) => {
     const av = a[sortKey] as number | string;
     const bv = b[sortKey] as number | string;
@@ -298,7 +301,7 @@ function DashboardClient() {
     );
   };
 
-  const filteredCampaigns = (summary?.campaigns ?? []).filter(
+  const filteredCampaigns = (displayedSummary?.campaigns ?? []).filter(
     (c) => !activeCampOnly || c.spend > 0 || c.impressions > 0 || c.results > 0
   );
   const sortedCampaigns = [...filteredCampaigns].sort((a, b) => {
@@ -337,31 +340,75 @@ function DashboardClient() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight flex flex-wrap items-center gap-3 sm:gap-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
             {isAllProjects ? "Portfolio Dashboard" : currentProject}
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value as any)}
-              className="text-sm border border-slate-200 rounded-lg px-2 py-1 bg-white text-slate-600 font-medium hover:border-slate-300 transition-colors cursor-pointer"
-            >
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="7d">Last 7 Days</option>
-              <option value="14d">Last 14 Days</option>
-              <option value="30d">Last 30 Days</option>
-            </select>
           </h1>
           <p className="text-slate-500 text-sm mt-1.5 font-medium" suppressHydrationWarning>{todayLabel}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+          <div className="relative flex items-center gap-2">
+            {dateRange !== "custom" && (
+              <div className="relative">
+                <select
+                  value={dateRange}
+                  onChange={(e) => setDateRange(e.target.value as any)}
+                  className="appearance-none pl-9 pr-8 py-2.5 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer shadow-sm"
+                >
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="7d">Last 7 Days</option>
+                  <option value="14d">Last 14 Days</option>
+                  <option value="30d">Last 30 Days</option>
+                  <option value="last_month">Last Month</option>
+                </select>
+                <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            )}
+
+            {dateRange === "custom" && (
+              <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
+                <input 
+                  type="date" 
+                  value={customStartDate} 
+                  onChange={e => setCustomStartDate(e.target.value)}
+                  className="text-sm px-2 py-1 bg-transparent text-slate-700 outline-none" 
+                />
+                <span className="text-slate-400 text-sm">to</span>
+                <input 
+                  type="date" 
+                  value={customEndDate} 
+                  onChange={e => setCustomEndDate(e.target.value)}
+                  className="text-sm px-2 py-1 bg-transparent text-slate-700 outline-none" 
+                />
+                <button 
+                  onClick={() => setDateRange("today")} 
+                  className="px-2 py-1 text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {dateRange !== "custom" && (
+              <button
+                onClick={() => setDateRange("custom")}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 shadow-sm"
+              >
+                <Calendar className="w-4 h-4 text-slate-500" />
+                <span className="hidden sm:inline">Custom</span>
+              </button>
+            )}
+          </div>
+
           <button
             onClick={handleRefresh}
             disabled={refreshing}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline">{refreshing ? "Syncing Meta..." : "Sync Now (R)"}</span>
+            <span className="hidden sm:inline">{refreshing ? "Syncing..." : "Sync Now"}</span>
           </button>
 
           <button
@@ -380,29 +427,47 @@ function DashboardClient() {
         <h3 className="font-semibold text-slate-900">Top-Level Metrics</h3>
         <ShareButton elementId="snapshot-stat-cards" fileName="top-level-metrics" title="Top-Level Metrics" />
       </div>
+      
+      {/* Campaign Filter Dropdown */}
+      {availableCampaigns.length > 0 && !isAllProjects && (
+        <div className="flex items-center gap-3 mb-6 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+          <span className="text-sm font-medium text-slate-600 ml-2">Filter by Campaign:</span>
+          <select
+            value={selectedCampaign}
+            onChange={(e) => setSelectedCampaign(e.target.value)}
+            className="flex-1 appearance-none bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
+          >
+            <option value="all">All Campaigns</option>
+            {availableCampaigns.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
         <StatCard
           label="Total Spend"
-          value={summary ? formatINR(summary.totalSpend) : "₹0"}
+          value={displayedSummary ? formatINR(displayedSummary.totalSpend) : "₹0"}
           icon={<DollarSign className="w-4 h-4" />}
           loading={loading}
         />
         <StatCard
           label="Total Leads / Results"
-          value={summary ? String(summary.totalResults) : "0"}
+          value={displayedSummary ? String(displayedSummary.totalResults) : "0"}
           icon={<Target className="w-4 h-4" />}
           loading={loading}
         />
         <StatCard
           label="Avg Cost Per Lead"
-          value={summary ? formatINR(summary.avgCPA) : "₹0"}
+          value={displayedSummary ? formatINR(displayedSummary.avgCPA) : "₹0"}
           icon={<Users className="w-4 h-4" />}
           loading={loading}
           invertGood
         />
         <StatCard
           label="Avg CTR"
-          value={summary ? `${formatNum(summary.avgCTR)}%` : "0%"}
+          value={displayedSummary ? `${formatNum(displayedSummary.avgCTR)}%` : "0%"}
           icon={<MousePointerClick className="w-4 h-4" />}
           loading={loading}
         />
@@ -460,7 +525,7 @@ function DashboardClient() {
       {/* Trend Chart */}
       <div className="rounded-2xl bg-white border border-slate-200 p-6 mb-8 shadow-sm">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="font-semibold text-slate-900">Performance Trend (Last {trendDaysFor(dateRange)} Days)</h3>
+          <h3 className="font-semibold text-slate-900">Performance Trend (Last {trendDaysFor(dateRange, customStartDate, customEndDate)} Days)</h3>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
             <button
               onClick={() => setActiveChart("spend")}
@@ -814,10 +879,10 @@ function DashboardClient() {
             title={`${isAllProjects ? 'Portfolio' : currentProject} Performance`}
             subtitle={todayLabel}
             stats={[
-              { label: "Total Spend", value: formatINR(summary.totalSpend), icon: "spend" },
-              { label: "Total Leads", value: String(summary.totalResults), icon: "leads" },
-              { label: "Cost Per Lead", value: formatINR(summary.avgCPA), icon: "cpa" },
-              { label: "Avg CTR", value: `${formatNum(summary.avgCTR)}%`, icon: "ctr" },
+              { label: "Total Spend", value: displayedSummary ? formatINR(displayedSummary.totalSpend) : "₹0", icon: "spend" },
+              { label: "Total Leads", value: displayedSummary ? String(displayedSummary.totalResults) : "0", icon: "leads" },
+              { label: "Cost Per Lead", value: displayedSummary ? formatINR(displayedSummary.avgCPA) : "₹0", icon: "cpa" },
+              { label: "Avg CTR", value: displayedSummary ? `${formatNum(displayedSummary.avgCTR)}%` : "0%", icon: "ctr" },
             ]}
           />
           {isAllProjects && portfolio.length > 0 && (

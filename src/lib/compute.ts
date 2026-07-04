@@ -24,6 +24,7 @@ export interface AdSnapshot {
   cost_per_result: number;
   snapshot_date?: string;
   campaign_id?: string;
+  project_name?: string;
 }
 
 export function formatNum(n: number, decimals = 2) {

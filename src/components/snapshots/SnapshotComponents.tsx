@@ -30,8 +30,9 @@ export function SnapshotStatCards({
   };
 
   return (
-    <div id={id} className="absolute left-[-9999px] top-0 pointer-events-none">
-      <SnapshotFrame title={title} subtitle={subtitle}>
+    <div className="absolute left-[-9999px] top-0 pointer-events-none">
+      <div id={id}>
+        <SnapshotFrame title={title} subtitle={subtitle}>
         <div className="grid grid-cols-4 gap-4 bg-slate-50 p-6">
           {stats.map((s, i) => (
             <div key={i} className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
@@ -46,6 +47,7 @@ export function SnapshotStatCards({
           ))}
         </div>
       </SnapshotFrame>
+      </div>
     </div>
   );
 }
@@ -70,8 +72,9 @@ export function SnapshotTable({
   const hiddenCount = data.length - MAX_ROWS;
 
   return (
-    <div id={id} className="absolute left-[-9999px] top-0 pointer-events-none">
-      <SnapshotFrame title={title} subtitle={subtitle}>
+    <div className="absolute left-[-9999px] top-0 pointer-events-none">
+      <div id={id}>
+        <SnapshotFrame title={title} subtitle={subtitle}>
         <div className="bg-white">
           <table className="w-full text-sm text-left">
             <thead>
@@ -94,6 +97,7 @@ export function SnapshotTable({
           )}
         </div>
       </SnapshotFrame>
+      </div>
     </div>
   );
 }

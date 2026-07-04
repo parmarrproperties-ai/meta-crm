@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",
+    "agentation": "^3.0.2",
     "clsx": "^2.1.1",
     "html-to-image": "^1.11.13",
     "lucide-react": "^1.23.0",

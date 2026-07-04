@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
 import { ClientLayout } from "@/components/ClientLayout";
+import { Agentation } from "agentation";
 
 import { Suspense } from "react";
 
@@ -29,6 +30,7 @@ export default function RootLayout({
             {children}
           </ClientLayout>
         </Suspense>
+        <Agentation />
       </body>
     </html>
   );
