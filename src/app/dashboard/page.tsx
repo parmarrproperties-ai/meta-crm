@@ -125,11 +125,65 @@ function DashboardClient() {
   const [activeAdsOnly, setActiveAdsOnly] = useState(false);
   const [activeCampOnly, setActiveCampOnly] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<string>("all");
+  
+  const ALL_COLUMNS = [
+    { key: "spend", label: "Spend" },
+    { key: "impressions", label: "Impr." },
+    { key: "clicks", label: "Clicks" },
+    { key: "ctr", label: "CTR" },
+    { key: "cpc", label: "CPC" },
+    { key: "results", label: "Leads" },
+    { key: "cost_per_result", label: "Cost/Lead" }
+  ];
+  const [visibleColumns, setVisibleColumns] = useState<string[]>([
+    "spend", "impressions", "clicks", "results", "cost_per_result"
+  ]);
 
   const availableCampaigns = useMemo(() => {
     if (!summary) return [];
     const camps = summary.ads.map((ad) => ad.campaign_name).filter(Boolean);
-    return Array.from(new Set(camps)).sort();
+    const unique = Array.from(new Set(camps));
+    
+    // Helper to extract a plausible date from campaign names
+    const extractDate = (name: string): number => {
+      const norm = name.replace(/\b(\d+)(st|nd|rd|th)\b/gi, "$1");
+      
+      // Match DD-MM-YYYY or DD.MM.YYYY
+      const dmy = norm.match(/\b(\d{2})[-/.](\d{2})[-/.](\d{4})\b/);
+      if (dmy) {
+        const d = new Date(`${dmy[3]}-${dmy[2]}-${dmy[1]}`);
+        if (!isNaN(d.getTime())) return d.getTime();
+      }
+
+      // Match YYYY-MM-DD
+      const ymd = norm.match(/\b(\d{4})[-/.](\d{2})[-/.](\d{2})\b/);
+      if (ymd) {
+        const d = new Date(ymd[0]);
+        if (!isNaN(d.getTime())) return d.getTime();
+      }
+
+      // Match "14 Jul 2024", "Jul 2024", "14 July"
+      const alpha = norm.match(/\b(?:(\d{1,2})[-/\s]+)?(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-/\s]+(?:(\d{4})\b)?/i);
+      if (alpha) {
+        const day = alpha[1] || "1";
+        const month = alpha[2];
+        const year = alpha[3] || new Date().getFullYear();
+        const d = new Date(`${day} ${month} ${year}`);
+        if (!isNaN(d.getTime())) return d.getTime();
+      }
+
+      return 0;
+    };
+
+    return unique.sort((a, b) => {
+      const dateA = extractDate(a);
+      const dateB = extractDate(b);
+      
+      if (dateA > 0 && dateB > 0) return dateB - dateA; // Latest first
+      if (dateA > 0) return -1; // Dates bubble to top
+      if (dateB > 0) return 1;
+      return a.localeCompare(b); // Alphabetical fallback
+    });
   }, [summary]);
 
   const displayedSummary = useMemo(() => {
@@ -213,24 +267,51 @@ function DashboardClient() {
   const handleNativeShare = async () => {
     if (!displayedSummary) return;
     const { generateDailyWhatsAppText } = await import("@/lib/whatsappFormat");
-    const text = generateDailyWhatsAppText(displayedSummary, currentProject, todayLabel);
+    const text = generateDailyWhatsAppText(displayedSummary, currentProject, todayLabel, selectedCampaign);
     
-    if (navigator.share) {
+    // In secure contexts (HTTPS or localhost), try native share first
+    if (navigator.share && window.isSecureContext) {
       try {
         await navigator.share({
           title: "Daily Meta Ads Report",
           text: text,
         });
+        return; // Success
       } catch (err) {
-        if ((err as Error).name !== 'AbortError') {
-          showToast("Failed to share", "error");
+        if ((err as Error).name === 'AbortError') {
+          return; // User cancelled share dialog
         }
+        // If it failed for another reason, fallback to clipboard
       }
-    } else {
-      try {
+    }
+    
+    // Fallback 1: Clipboard
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
-        showToast("Report copied to clipboard! You can paste it anywhere.", "success");
-      } catch {
+      } else {
+        // Legacy fallback for insecure contexts (e.g. testing on mobile via 192.168.x.x)
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        
+        if (!successful) throw new Error("Fallback copy failed");
+      }
+      showToast("Report copied to clipboard! You can paste it anywhere.", "success");
+    } catch (err) {
+      // Fallback 2: Open WhatsApp directly
+      try {
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+        showToast("Opened WhatsApp directly", "success");
+      } catch (e) {
         showToast("Sharing not supported on this browser", "error");
       }
     }
@@ -347,13 +428,13 @@ function DashboardClient() {
         </div>
 
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
-          <div className="relative flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          <div className="relative flex gap-2 w-full sm:w-auto">
             {dateRange !== "custom" && (
-              <div className="relative w-full sm:w-auto">
+              <div className="relative flex-1 sm:flex-none">
                 <select
                   value={dateRange}
                   onChange={(e) => setDateRange(e.target.value as any)}
-                  className="appearance-none w-full sm:w-auto pl-9 pr-8 py-2.5 sm:py-2 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer shadow-sm h-[44px] sm:h-auto"
+                  className="appearance-none w-full pl-9 pr-8 py-2.5 sm:py-2 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer shadow-sm h-[44px] sm:h-auto"
                 >
                   <option value="today">Today</option>
                   <option value="yesterday">Yesterday</option>
@@ -368,23 +449,23 @@ function DashboardClient() {
             )}
 
             {dateRange === "custom" && (
-              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 bg-white border border-slate-200 rounded-xl p-1 sm:p-1 shadow-sm w-full sm:w-auto h-auto min-h-[44px]">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white border border-slate-200 rounded-xl p-2 sm:p-1 shadow-sm w-full sm:w-auto h-auto">
                 <input 
                   type="date" 
                   value={customStartDate} 
                   onChange={e => setCustomStartDate(e.target.value)}
-                  className="flex-1 text-sm px-2 py-1.5 sm:py-1 bg-transparent text-slate-700 outline-none min-w-[120px]" 
+                  className="w-full sm:flex-1 text-sm px-3 py-2 sm:py-1 bg-slate-50 sm:bg-transparent rounded-lg sm:rounded-none border border-slate-100 sm:border-0 text-slate-700 outline-none h-[44px] sm:h-auto" 
                 />
-                <span className="text-slate-400 text-sm px-1">to</span>
+                <span className="text-slate-400 text-sm hidden sm:block px-1">to</span>
                 <input 
                   type="date" 
                   value={customEndDate} 
                   onChange={e => setCustomEndDate(e.target.value)}
-                  className="flex-1 text-sm px-2 py-1.5 sm:py-1 bg-transparent text-slate-700 outline-none min-w-[120px]" 
+                  className="w-full sm:flex-1 text-sm px-3 py-2 sm:py-1 bg-slate-50 sm:bg-transparent rounded-lg sm:rounded-none border border-slate-100 sm:border-0 text-slate-700 outline-none h-[44px] sm:h-auto" 
                 />
                 <button 
                   onClick={() => setDateRange("today")} 
-                  className="w-full sm:w-auto px-2 py-2 sm:py-1 text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors border-t border-slate-100 sm:border-0"
+                  className="w-full sm:w-auto px-3 py-2.5 sm:py-1 text-sm font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors border-t border-slate-100 sm:border-0 sm:border-l mt-1 sm:mt-0"
                 >
                   Cancel
                 </button>
@@ -394,11 +475,10 @@ function DashboardClient() {
             {dateRange !== "custom" && (
               <button
                 onClick={() => setDateRange("custom")}
-                className="w-full sm:w-auto flex justify-center items-center gap-2 px-3 py-2.5 sm:py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 shadow-sm h-[44px] sm:h-auto"
+                className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 py-2.5 sm:py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-sm font-medium text-slate-700 transition-all duration-150 shadow-sm h-[44px] sm:h-auto whitespace-nowrap"
               >
                 <Calendar className="w-4 h-4 text-slate-500" />
-                <span className="inline sm:hidden">Custom Date Range</span>
-                <span className="hidden sm:inline">Custom</span>
+                <span className="inline">Custom</span>
               </button>
             )}
           </div>
@@ -461,7 +541,7 @@ function DashboardClient() {
 
       {/* Portfolio Breakdown (Only if "all" is selected) */}
       {isAllProjects && portfolio.length > 0 && (
-        <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm mb-8">
+        <div id="snapshot-portfolio" className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm mb-8">
           <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div>
               <h3 className="font-semibold text-slate-900">Portfolio Breakdown</h3>
@@ -469,46 +549,39 @@ function DashboardClient() {
             </div>
             <ShareButton elementId="snapshot-portfolio" fileName="portfolio-breakdown" title="Portfolio Breakdown" />
           </div>
-          <div className="overflow-x-auto sm:overflow-visible">
+          <div className="overflow-x-auto w-full">
             <table className="w-full text-sm text-left">
-              <thead className="hidden sm:table-header-group">
-                <tr className="border-b border-slate-100 bg-slate-50/30">
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 text-left uppercase tracking-wider">Project Name</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 text-left uppercase tracking-wider">Account Name</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Spend</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Leads</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cost/Lead</th>
+              <thead className="bg-slate-50/30 border-b border-slate-100">
+                <tr>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Account Name</th>
+                  {ALL_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(col => (
+                    <th key={col.key} className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 sm:divide-y sm:divide-slate-100 space-y-4 sm:space-y-0 p-4 sm:p-0 flex flex-col sm:table-row-group bg-slate-50/50 sm:bg-transparent">
+              <tbody className="divide-y divide-slate-100 bg-white">
                 {portfolio.map((p) => (
-                  <tr key={`${p.project_name}::${p.account_name}`} className="flex flex-col sm:table-row bg-white rounded-xl border border-slate-200 sm:border-0 sm:bg-transparent shadow-sm sm:shadow-none hover:bg-slate-50/50 transition-colors p-1 sm:p-0">
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-medium text-slate-900 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Project</span>
-                      <div className="max-w-[150px] sm:max-w-[200px] truncate text-right sm:text-left">
-                        {p.project_name}
-                      </div>
+                  <tr key={`${p.project_name}::${p.account_name}`} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-5 py-3 font-medium text-slate-900 whitespace-nowrap">
+                      <div className="max-w-[200px] truncate" title={p.account_name}>{p.account_name}</div>
                     </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-700 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Account</span>
-                      <div className="max-w-[150px] sm:max-w-[200px] truncate text-right sm:text-left">
-                        {p.account_name}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-600 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Spend</span>
-                      {formatINR(p.spend)}
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Leads</span>
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
-                        {p.results}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-medium text-slate-900 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Cost/Lead</span>
-                      {formatINR(p.cost_per_result)}
-                    </td>
+                    {visibleColumns.includes("spend") && <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{formatINR(p.spend)}</td>}
+                    {visibleColumns.includes("impressions") && <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{p.impressions?.toLocaleString("en-IN") || "0"}</td>}
+                    {visibleColumns.includes("clicks") && <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{p.clicks?.toLocaleString("en-IN") || "0"}</td>}
+                    {visibleColumns.includes("ctr") && <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{formatNum((p as any).ctr || 0)}%</td>}
+                    {visibleColumns.includes("cpc") && <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{formatINR((p as any).cpc || 0)}</td>}
+                    {visibleColumns.includes("results") && (
+                      <td className="px-5 py-3 whitespace-nowrap">
+                        <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${p.results > 0 ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-slate-100 text-slate-500 border border-slate-200"}`}>{p.results}</span>
+                      </td>
+                    )}
+                    {visibleColumns.includes("cost_per_result") && <td className="px-5 py-3 font-semibold text-slate-900 whitespace-nowrap">
+                        <span className={p.results === 0 ? "text-slate-400" : "text-slate-900"}>
+                          {p.results === 0 ? "—" : formatINR(p.cost_per_result)}
+                        </span>
+                    </td>}
                   </tr>
                 ))}
               </tbody>
@@ -598,20 +671,46 @@ function DashboardClient() {
         )}
       </div>
 
-      {/* Campaign Filter Dropdown */}
-      <div className="flex items-center gap-3 mb-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-        <span className="text-sm font-medium text-slate-600 ml-2">Filter by Campaign:</span>
-        <select
-          value={selectedCampaign}
-          onChange={(e) => setSelectedCampaign(e.target.value)}
-          disabled={availableCampaigns.length === 0}
-          className="flex-1 appearance-none bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <option value="all">All Campaigns</option>
-          {availableCampaigns.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+      {/* Filters Row */}
+      <div className="flex flex-col xl:flex-row gap-4 mb-8">
+        {/* Campaign Filter Dropdown */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm flex-1">
+          <span className="text-sm font-semibold text-slate-700 sm:ml-2 whitespace-nowrap">Campaign:</span>
+          <div className="relative flex-1 w-full min-w-0">
+            <select
+              value={selectedCampaign}
+              onChange={(e) => setSelectedCampaign(e.target.value)}
+              disabled={availableCampaigns.length === 0}
+              className="w-full appearance-none bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-10 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed truncate"
+            >
+              <option value="all">All Campaigns</option>
+              {availableCampaigns.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+        </div>
+
+        {/* Columns Toggle */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm flex-1">
+          <span className="text-sm font-semibold text-slate-700 sm:ml-2 whitespace-nowrap">Columns:</span>
+          <div className="flex-1 flex flex-wrap gap-2">
+            {ALL_COLUMNS.map(col => (
+              <button
+                key={col.key}
+                onClick={() => setVisibleColumns(prev => prev.includes(col.key) ? prev.filter(k => k !== col.key) : [...prev, col.key])}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
+                  visibleColumns.includes(col.key) 
+                    ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100' 
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {col.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Campaign Performance Table */}
@@ -635,7 +734,7 @@ function DashboardClient() {
           </div>
         </div>
 
-        <div className="overflow-x-auto sm:overflow-visible">
+        <div className="overflow-x-auto w-full">
           {loading ? (
             <div className="p-6 space-y-3">
               {[...Array(3)].map((_, i) => (
@@ -648,85 +747,77 @@ function DashboardClient() {
             </div>
           ) : (
             <table className="w-full text-sm text-left">
-              <thead className="hidden sm:table-header-group">
-                <tr className="border-b border-slate-200 bg-white">
-                  {(
-                    [
-                      ["campaign_name", "Campaign"],
-                      ["spend", "Spend"],
-                      ["impressions", "Impr."],
-                      ["clicks", "Clicks"],
-                      ["ctr", "CTR"],
-                      ["cpc", "CPC"],
-                      ["results", "Leads"],
-                      ["cost_per_result", "Cost/Lead"],
-                    ] as [keyof DailySummary["campaigns"][0], string][]
-                  ).map(([key, label]) => (
+              <thead className="bg-slate-50/30 border-b border-slate-100">
+                <tr>
+                  <th
+                    onClick={() => handleCampSort("campaign_name")}
+                    className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 hover:text-slate-800 transition-colors whitespace-nowrap"
+                  >
+                    Campaign
+                    <SortIcon col={"campaign_name"} isCamp={true} />
+                  </th>
+                  {ALL_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(col => (
                     <th
-                      key={key}
-                      onClick={() => handleCampSort(key)}
-                      className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 hover:text-slate-800 transition-colors whitespace-nowrap bg-slate-50/30"
+                      key={col.key}
+                      onClick={() => handleCampSort(col.key as any)}
+                      className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 hover:text-slate-800 transition-colors whitespace-nowrap"
                     >
-                      {label}
-                      <SortIcon col={key} isCamp={true} />
+                      {col.label}
+                      <SortIcon col={col.key as any} isCamp={true} />
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 sm:divide-y sm:divide-slate-100 space-y-4 sm:space-y-0 p-4 sm:p-0 flex flex-col sm:table-row-group bg-slate-50/50 sm:bg-transparent">
+              <tbody className="divide-y divide-slate-100 bg-white">
                 {sortedCampaigns.map((camp) => (
                   <tr
                     key={camp.campaign_name}
-                    className="flex flex-col sm:table-row bg-white rounded-xl border border-slate-200 sm:border-0 sm:bg-transparent shadow-sm sm:shadow-none hover:bg-slate-50/50 transition-colors p-1 sm:p-0 group"
+                    className="hover:bg-slate-50 transition-colors group"
                   >
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell group-hover:bg-slate-50/70 transition-colors sticky sm:static left-0 bg-white z-10">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Campaign</span>
-                      <p className="font-medium text-slate-900 text-sm max-w-[150px] sm:max-w-[280px] truncate text-right sm:text-left">
+                    <td className="px-5 py-3 border-b border-slate-50 bg-white whitespace-nowrap">
+                      <div className="font-medium text-slate-900 max-w-[280px] truncate" title={camp.campaign_name}>
                         {camp.campaign_name}
-                      </p>
+                      </div>
                     </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-medium text-slate-700 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Spend</span>
-                      <span className="font-medium text-slate-700">{formatINR(camp.spend)}</span>
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Impr.</span>
-                      {camp.impressions.toLocaleString("en-IN")}
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Clicks</span>
-                      {camp.clicks.toLocaleString("en-IN")}
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">CTR</span>
-                      {formatNum(camp.ctr)}%
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">CPC</span>
-                      {formatINR(camp.cpc)}
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Leads</span>
-                      <span
-                        className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${
-                          camp.results > 0
-                            ? "bg-blue-50 text-blue-700 border border-blue-100"
-                            : "bg-slate-100 text-slate-500 border border-slate-200"
-                        }`}
-                      >
-                        {camp.results}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-semibold border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
-                      <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Cost/Lead</span>
-                      <span
-                        className={
-                          camp.results === 0 ? "text-slate-400" : "text-slate-900"
-                        }
-                      >
-                        {camp.results === 0 ? "—" : formatINR(camp.cost_per_result)}
-                      </span>
-                    </td>
+                    {visibleColumns.includes("spend") && (
+                      <td className="px-5 py-3 font-medium text-slate-700 whitespace-nowrap border-b border-slate-50">
+                        {formatINR(camp.spend)}
+                      </td>
+                    )}
+                    {visibleColumns.includes("impressions") && (
+                      <td className="px-5 py-3 text-slate-500 whitespace-nowrap border-b border-slate-50">
+                        {camp.impressions.toLocaleString("en-IN")}
+                      </td>
+                    )}
+                    {visibleColumns.includes("clicks") && (
+                      <td className="px-5 py-3 text-slate-500 whitespace-nowrap border-b border-slate-50">
+                        {camp.clicks.toLocaleString("en-IN")}
+                      </td>
+                    )}
+                    {visibleColumns.includes("ctr") && (
+                      <td className="px-5 py-3 text-slate-500 whitespace-nowrap border-b border-slate-50">
+                        {formatNum((camp as any).ctr || 0)}%
+                      </td>
+                    )}
+                    {visibleColumns.includes("cpc") && (
+                      <td className="px-5 py-3 text-slate-500 whitespace-nowrap border-b border-slate-50">
+                        {formatINR((camp as any).cpc || 0)}
+                      </td>
+                    )}
+                    {visibleColumns.includes("results") && (
+                      <td className="px-5 py-3 border-b border-slate-50 whitespace-nowrap">
+                        <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${camp.results > 0 ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-slate-100 text-slate-500 border border-slate-200"}`}>
+                          {camp.results}
+                        </span>
+                      </td>
+                    )}
+                    {visibleColumns.includes("cost_per_result") && (
+                      <td className="px-5 py-3 font-semibold whitespace-nowrap border-b border-slate-50">
+                        <span className={camp.results === 0 ? "text-slate-400" : "text-slate-900"}>
+                          {camp.results === 0 ? "—" : formatINR(camp.cost_per_result)}
+                        </span>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -778,7 +869,7 @@ function DashboardClient() {
           </div>
         </div>
 
-        <div className="overflow-x-auto sm:overflow-visible">
+        <div className="overflow-x-auto w-full">
           {loading ? (
             <div className="p-6 space-y-3">
               {[...Array(5)].map((_, i) => (
@@ -793,32 +884,28 @@ function DashboardClient() {
             </div>
           ) : (
             <table className="w-full text-sm text-left">
-              <thead className="hidden sm:table-header-group">
-                <tr className="border-b border-slate-200 bg-white">
-                  {(
-                    [
-                      ["ad_name", "Ad & Campaign"],
-                      ["spend", "Spend"],
-                      ["impressions", "Impr."],
-                      ["clicks", "Clicks"],
-                      ["ctr", "CTR"],
-                      ["cpc", "CPC"],
-                      ["results", "Leads"],
-                      ["cost_per_result", "Cost/Lead"],
-                    ] as [SortKey, string][]
-                  ).map(([key, label]) => (
+              <thead className="bg-slate-50/30 border-b border-slate-100">
+                <tr>
+                  <th
+                    onClick={() => handleSort("ad_name")}
+                    className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 hover:text-slate-800 transition-colors whitespace-nowrap"
+                  >
+                    Ad & Campaign
+                    <SortIcon col={"ad_name"} />
+                  </th>
+                  {ALL_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(col => (
                     <th
-                      key={key}
-                      onClick={() => handleSort(key)}
-                      className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 hover:text-slate-800 transition-colors whitespace-nowrap bg-slate-50/30"
+                      key={col.key}
+                      onClick={() => handleSort(col.key as any)}
+                      className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 hover:text-slate-800 transition-colors whitespace-nowrap"
                     >
-                      {label}
-                      <SortIcon col={key} />
+                      {col.label}
+                      <SortIcon col={col.key as any} />
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 sm:divide-y sm:divide-slate-100 space-y-4 sm:space-y-0 p-4 sm:p-0 flex flex-col sm:table-row-group bg-slate-50/50 sm:bg-transparent">
+              <tbody className="divide-y divide-slate-100 bg-white">
                 {(adScope === "overall" 
                   ? sortedAds 
                   : Array.from(new Set(sortedAds.map(a => a.campaign_name)))
@@ -835,8 +922,8 @@ function DashboardClient() {
                 ).map((item: any) => {
                   if (item.isHeader) {
                     return (
-                      <tr key={item.id} className="bg-slate-50/80 rounded-xl sm:rounded-none">
-                        <td colSpan={8} className="px-4 py-3 sm:px-5 sm:py-2 font-bold text-slate-700 text-xs uppercase tracking-wider block sm:table-cell">
+                      <tr key={item.id} className="bg-slate-50/80">
+                        <td colSpan={1 + visibleColumns.length} className="px-5 py-2 font-bold text-slate-700 text-xs uppercase tracking-wider">
                           {item.title}
                         </td>
                       </tr>
@@ -847,62 +934,58 @@ function DashboardClient() {
                   return (
                     <tr
                       key={ad.ad_id}
-                      className="flex flex-col sm:table-row bg-white rounded-xl border border-slate-200 sm:border-0 sm:bg-transparent shadow-sm sm:shadow-none hover:bg-slate-50/50 transition-colors p-1 sm:p-0 group"
+                      className="hover:bg-slate-50 transition-colors group"
                     >
-                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-start sm:items-center sm:table-cell group-hover:bg-slate-50/70 transition-colors sticky sm:static left-0 bg-white z-10">
-                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase mt-0.5">Ad / Camp</span>
-                        <div className="max-w-[200px] sm:max-w-[280px] text-right sm:text-left">
-                          <p className="font-medium text-slate-900 truncate text-sm">
+                      <td className="px-5 py-3 border-b border-slate-50 bg-white whitespace-nowrap">
+                        <div className="max-w-[280px]">
+                          <p className="font-medium text-slate-900 truncate text-sm" title={ad.ad_name}>
                             {ad.ad_name}
                           </p>
-                          <p className="text-xs text-slate-500 truncate mt-0.5">
+                          <p className="text-xs text-slate-500 truncate mt-0.5" title={ad.campaign_name}>
                             {isAllProjects && <span className="font-medium text-blue-600 mr-1">[{ad.project_name}]</span>}
                             {ad.campaign_name}
                           </p>
                         </div>
                       </td>
-                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-medium text-slate-700 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
-                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Spend</span>
-                        <span className="font-medium text-slate-700">{formatINR(ad.spend)}</span>
-                      </td>
-                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
-                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Impr.</span>
-                        {ad.impressions.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Clicks</span>
-                        {ad.clicks.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">CTR</span>
-                        {formatNum(ad.ctr)}%
-                      </td>
-                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 text-slate-500 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">CPC</span>
-                        {formatINR(ad.cpc)}
-                      </td>
-                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell">
-                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Leads</span>
-                        <span
-                          className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${
-                            ad.results > 0
-                              ? "bg-blue-50 text-blue-700 border border-blue-100"
-                              : "bg-slate-100 text-slate-500 border border-slate-200"
-                          }`}
-                        >
-                          {ad.results}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 sm:px-5 sm:py-2.5 font-semibold border-b border-slate-50 sm:border-0 flex justify-between items-center sm:table-cell whitespace-nowrap">
-                        <span className="sm:hidden font-medium text-slate-500 text-xs uppercase">Cost/Lead</span>
-                        <span
-                          className={
-                            ad.results === 0 ? "text-slate-400" : "text-slate-900"
-                          }
-                        >
-                          {ad.results === 0 ? "—" : formatINR(ad.cost_per_result)}
-                        </span>
-                      </td>
+                      {visibleColumns.includes("spend") && (
+                        <td className="px-5 py-3 font-medium text-slate-700 whitespace-nowrap border-b border-slate-50">
+                          {formatINR(ad.spend)}
+                        </td>
+                      )}
+                      {visibleColumns.includes("impressions") && (
+                        <td className="px-5 py-3 text-slate-500 whitespace-nowrap border-b border-slate-50">
+                          {ad.impressions.toLocaleString("en-IN")}
+                        </td>
+                      )}
+                      {visibleColumns.includes("clicks") && (
+                        <td className="px-5 py-3 text-slate-500 whitespace-nowrap border-b border-slate-50">
+                          {ad.clicks.toLocaleString("en-IN")}
+                        </td>
+                      )}
+                      {visibleColumns.includes("ctr") && (
+                        <td className="px-5 py-3 text-slate-500 whitespace-nowrap border-b border-slate-50">
+                          {formatNum(ad.ctr || 0)}%
+                        </td>
+                      )}
+                      {visibleColumns.includes("cpc") && (
+                        <td className="px-5 py-3 text-slate-500 whitespace-nowrap border-b border-slate-50">
+                          {formatINR(ad.cpc || 0)}
+                        </td>
+                      )}
+                      {visibleColumns.includes("results") && (
+                        <td className="px-5 py-3 border-b border-slate-50 whitespace-nowrap">
+                          <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold min-w-[28px] ${ad.results > 0 ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-slate-100 text-slate-500 border border-slate-200"}`}>
+                            {ad.results}
+                          </span>
+                        </td>
+                      )}
+                      {visibleColumns.includes("cost_per_result") && (
+                        <td className="px-5 py-3 font-semibold whitespace-nowrap border-b border-slate-50">
+                          <span className={ad.results === 0 ? "text-slate-400" : "text-slate-900"}>
+                            {ad.results === 0 ? "—" : formatINR(ad.cost_per_result)}
+                          </span>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

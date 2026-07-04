@@ -8,26 +8,28 @@ function formatINR(amount: number) {
   }).format(amount);
 }
 
-export function generateDailyWhatsAppText(summary: any, projectName: string, dateLabel: string): string {
+export function generateDailyWhatsAppText(summary: any, projectName: string, dateLabel: string, campaignName: string = "all"): string {
   const isPortfolio = projectName.toLowerCase() === "all" || projectName.toLowerCase() === "portfolio";
   const title = isPortfolio ? "Portfolio" : projectName;
 
-  let text = `*Daily Ads Summary - ${title}*
-${dateLabel}
-
+  let text = `*Daily Ads Summary - ${title}*`;
+  if (campaignName && campaignName !== "all") {
+    text += `\n*Campaign:* ${campaignName}`;
+  }
+  text += `\n${dateLabel}\n
 *Spend:* ${formatINR(summary.totalSpend)}
 *Leads:* ${summary.totalResults}
 *Cost/Lead:* ${formatINR(summary.avgCPA)}
 *CTR:* ${formatNum(summary.avgCTR)}%\n`;
 
-  if (summary.topAds && summary.topAds.length > 0) {
-    const top = summary.topAds[0];
-    text += `\n✅ *Top Ad:* ${top.ad_name} (${formatINR(top.cost_per_result)}/lead)`;
+  const topAd = summary.bestAd || (summary.topAds && summary.topAds.length > 0 ? summary.topAds[0] : null);
+  if (topAd) {
+    text += `\n✅ *Top Ad:* ${topAd.ad_name} (${formatINR(topAd.cost_per_result)}/lead)`;
   }
 
-  if (summary.bottomAds && summary.bottomAds.length > 0) {
-    const bottom = summary.bottomAds[0];
-    text += `\n⚠️ *Watch:* ${bottom.ad_name} (${formatINR(bottom.spend)} spend, ${bottom.results} leads)`;
+  const bottomAd = summary.worstAd || (summary.bottomAds && summary.bottomAds.length > 0 ? summary.bottomAds[0] : null);
+  if (bottomAd) {
+    text += `\n⚠️ *Watch:* ${bottomAd.ad_name} (${formatINR(bottomAd.spend)} spend, ${bottomAd.results} leads)`;
   }
 
   return text;
