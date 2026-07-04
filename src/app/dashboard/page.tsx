@@ -428,23 +428,6 @@ function DashboardClient() {
         <ShareButton elementId="snapshot-stat-cards" fileName="top-level-metrics" title="Top-Level Metrics" />
       </div>
       
-      {/* Campaign Filter Dropdown */}
-      {availableCampaigns.length > 0 && !isAllProjects && (
-        <div className="flex items-center gap-3 mb-6 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-          <span className="text-sm font-medium text-slate-600 ml-2">Filter by Campaign:</span>
-          <select
-            value={selectedCampaign}
-            onChange={(e) => setSelectedCampaign(e.target.value)}
-            className="flex-1 appearance-none bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
-          >
-            <option value="all">All Campaigns</option>
-            {availableCampaigns.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
         <StatCard
           label="Total Spend"
@@ -603,8 +586,24 @@ function DashboardClient() {
         )}
       </div>
 
+      {/* Campaign Filter Dropdown */}
+      <div className="flex items-center gap-3 mb-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+        <span className="text-sm font-medium text-slate-600 ml-2">Filter by Campaign:</span>
+        <select
+          value={selectedCampaign}
+          onChange={(e) => setSelectedCampaign(e.target.value)}
+          disabled={availableCampaigns.length === 0}
+          className="flex-1 appearance-none bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option value="all">All Campaigns</option>
+          {availableCampaigns.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+      </div>
+
       {/* Campaign Performance Table */}
-      <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm mb-8">
+      <div id="snapshot-campaigns" className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm mb-8">
         <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
           <div>
             <h3 className="font-semibold text-slate-900">Campaign Performance</h3>
@@ -711,7 +710,7 @@ function DashboardClient() {
       </div>
 
       {/* Ad Performance Table */}
-      <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm">
+      <div id="snapshot-ads" className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm">
         <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
           <div>
             <h3 className="font-semibold text-slate-900">Ad Performance</h3>
