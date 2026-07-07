@@ -311,7 +311,7 @@ function WeeklyDashboardClient() {
       {/* Stat Cards */}
       <div className="flex items-center justify-between mb-4 mt-8">
         <h3 className="font-semibold text-slate-900">Top-Level Metrics</h3>
-        <ShareButton elementId="snapshot-weekly-stats" fileName="weekly-stats" title="Top-Level Metrics" />
+        <ShareButton elementId="snapshot-weekly-stats" fileName="weekly-stats" title="Top-Level Metrics" subtitle={weekLabel} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
         <StatCard
@@ -368,7 +368,7 @@ function WeeklyDashboardClient() {
               <h3 className="font-semibold text-slate-900">Campaign Performance</h3>
               <p className="text-xs text-slate-500 mt-1">Rollup by campaign for this week</p>
             </div>
-            <ShareButton elementId="snapshot-weekly-campaigns" fileName="weekly-campaigns" title="Campaign Performance" />
+            <ShareButton elementId="snapshot-weekly-campaigns" fileName="weekly-campaigns" title="Campaign Performance" subtitle={weekLabel} />
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
@@ -413,7 +413,7 @@ function WeeklyDashboardClient() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-bold text-lg text-slate-800">Ads Performance</h2>
         <div className="flex gap-4 items-center">
-          <ShareButton elementId="snapshot-weekly-ads" fileName="weekly-ads-performance" title="Ads Performance" />
+          <ShareButton elementId="snapshot-weekly-ads" fileName="weekly-ads-performance" title="Ads Performance" subtitle={weekLabel} />
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
           <button
             onClick={() => setAdScope("overall")}

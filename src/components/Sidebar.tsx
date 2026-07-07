@@ -13,7 +13,8 @@ import {
   Building2,
   LayoutGrid,
   Check,
-  X
+  X,
+  Users
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
@@ -27,6 +28,11 @@ const navItems = [
     label: "Weekly Report",
     href: "/dashboard/weekly",
     icon: Calendar,
+  },
+  {
+    label: "Leads",
+    href: "/dashboard/leads",
+    icon: Users,
   },
 ];
 

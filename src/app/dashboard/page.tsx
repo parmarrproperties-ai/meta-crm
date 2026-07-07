@@ -33,6 +33,7 @@ import { ShareButton } from "@/components/ShareButton";
 import { SnapshotStatCards, SnapshotTable } from "@/components/snapshots/SnapshotComponents";
 import { computeDailySummary, type AdSnapshot as AdRow, type DailySummary } from "@/lib/compute";
 import { useSearchParams } from "next/navigation";
+import { takeCombinedSnapshot } from "@/lib/snapshot";
 
 interface PortfolioRow {
   project_name: string;
@@ -498,6 +499,23 @@ function DashboardClient() {
               disabled={!summary}
               className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-sm font-medium text-white transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-600/20 h-[44px] sm:h-auto"
             >
+              <MessageCircle className="w-4 h-4" />
+              <span className="inline">Share<span className="hidden sm:inline"> via WhatsApp</span></span>
+            </button>
+
+            <button
+              onClick={() => {
+                const elements = [
+                  "snapshot-stat-cards", 
+                  "snapshot-change-cards",
+                  ...(isAllProjects && portfolio.length > 0 ? ["snapshot-portfolio"] : []), 
+                  ...(isAllProjects ? [] : ["snapshot-campaigns"]),
+                  "snapshot-ads"
+                ];
+                takeCombinedSnapshot(elements, "daily-dashboard", "Daily Dashboard", todayLabel);
+              }}
+              className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-sm font-medium text-white transition-all duration-150 shadow-sm shadow-slate-900/20 h-[44px] sm:h-auto"
+            >
               <Share2 className="w-4 h-4" />
               <span className="inline">Share<span className="hidden sm:inline"> Report (S)</span></span>
             </button>
@@ -508,26 +526,34 @@ function DashboardClient() {
       {/* Stat Cards */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-slate-900">Top-Level Metrics</h3>
-        <ShareButton elementId="snapshot-stat-cards" fileName="top-level-metrics" title="Top-Level Metrics" />
+        <ShareButton elementId="snapshot-stat-cards" fileName="top-level-metrics" title="Top-Level Metrics" subtitle={todayLabel} />
       </div>
       
+
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
         <StatCard
           label="Total Spend"
           value={displayedSummary ? formatINR(displayedSummary.totalSpend) : "₹0"}
           icon={<DollarSign className="w-4 h-4" />}
+          change={displayedSummary?.spendChangePct}
+          changeLabel="vs prior period"
           loading={loading}
         />
         <StatCard
           label="Total Leads / Results"
           value={displayedSummary ? String(displayedSummary.totalResults) : "0"}
           icon={<Target className="w-4 h-4" />}
+          change={displayedSummary?.resultsChangePct}
+          changeLabel="vs prior period"
           loading={loading}
         />
         <StatCard
           label="Avg Cost Per Lead"
           value={displayedSummary ? formatINR(displayedSummary.avgCPA) : "₹0"}
           icon={<Users className="w-4 h-4" />}
+          change={displayedSummary?.cpaChangePct}
+          changeLabel="vs prior period"
           loading={loading}
           invertGood
         />
@@ -539,6 +565,20 @@ function DashboardClient() {
         />
       </div>
 
+      {/* Week-over-week change summary */}
+      <div id="snapshot-change-cards" className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 mb-8">
+        {[
+          { label: "Spend Change", value: displayedSummary?.spendChangePct ?? null, invertGood: false },
+          { label: "Leads Change", value: displayedSummary?.resultsChangePct ?? null, invertGood: false },
+          { label: "Cost/Lead Change", value: displayedSummary?.cpaChangePct ?? null, invertGood: true },
+        ].map(({ label, value, invertGood }) => (
+          <div key={label} className="rounded-2xl bg-white border border-slate-200 p-5 flex items-center justify-between shadow-sm">
+            <span className="text-sm font-semibold text-slate-500">{label}</span>
+            <ChangeChip value={value} invertGood={invertGood} />
+          </div>
+        ))}
+      </div>
+
       {/* Portfolio Breakdown (Only if "all" is selected) */}
       {isAllProjects && portfolio.length > 0 && (
         <div id="snapshot-portfolio" className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm mb-8">
@@ -547,7 +587,7 @@ function DashboardClient() {
               <h3 className="font-semibold text-slate-900">Portfolio Breakdown</h3>
               <p className="text-xs text-slate-500 mt-1">Cross-project comparison</p>
             </div>
-            <ShareButton elementId="snapshot-portfolio" fileName="portfolio-breakdown" title="Portfolio Breakdown" />
+            <ShareButton elementId="snapshot-portfolio" fileName="portfolio-breakdown" title="Portfolio Breakdown" subtitle={todayLabel} />
           </div>
           <div className="overflow-x-auto w-full">
             <table className="w-full text-sm text-left">
@@ -721,7 +761,7 @@ function DashboardClient() {
             <p className="text-xs text-slate-500 mt-1">Rollup by campaign</p>
           </div>
           <div className="flex items-center gap-4">
-            <ShareButton elementId="snapshot-campaigns" fileName="campaign-performance" title="Campaign Performance" />
+            <ShareButton elementId="snapshot-campaigns" fileName="campaign-performance" title="Campaign Performance" subtitle={todayLabel} />
             <label className="text-sm font-medium text-slate-600 cursor-pointer flex items-center gap-2 select-none">
               <input 
                 type="checkbox" 
@@ -834,7 +874,7 @@ function DashboardClient() {
             <p className="text-xs text-slate-500 mt-1">Click column headers to sort</p>
           </div>
           <div className="flex items-center gap-4">
-            <ShareButton elementId="snapshot-ads" fileName="ad-performance" title="Ad Performance" />
+            <ShareButton elementId="snapshot-ads" fileName="ad-performance" title="Ad Performance" subtitle={todayLabel} />
             <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
               <button
                 onClick={() => setAdScope("overall")}
@@ -866,6 +906,92 @@ function DashboardClient() {
               />
               Active Ads Only (Activity &gt; 0)
             </label>
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-6 bg-slate-50/30 border-b border-slate-100">
+          <div className="space-y-8">
+            {(adScope === "overall" || !displayedSummary?.campaigns
+              ? [{ campaign_name: "Overall", top_ads: displayedSummary?.topAds ?? [], bottom_ads: displayedSummary?.bottomAds ?? [] }]
+              : displayedSummary.campaigns
+            ).map((group, groupIdx) => (
+              <div key={groupIdx} className="space-y-4">
+                {adScope === "per-campaign" && (
+                  <h3 className="text-sm font-semibold text-slate-700 border-b border-slate-200 pb-2">{group.campaign_name}</h3>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {/* Top Ads */}
+                  <div className="rounded-2xl bg-white border border-slate-200 p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center border border-emerald-100">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      </div>
+                      <h3 className="font-semibold text-slate-900 text-sm">Top Performing Ads</h3>
+                    </div>
+                    {loading ? (
+                      <div className="space-y-3">
+                        {[...Array(3)].map((_, i) => (
+                          <div key={i} className="h-14 bg-slate-50 rounded-xl animate-pulse" />
+                        ))}
+                      </div>
+                    ) : group.top_ads.length === 0 ? (
+                      <p className="text-slate-400 text-sm">No data yet.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {group.top_ads.map((ad, i) => (
+                          <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                            <span className="text-lg font-bold text-emerald-500 w-6 text-center">
+                              {i + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-900 truncate">{ad.ad_name}</p>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                <span className="font-medium text-slate-700">{ad.results} leads</span> · {formatINR(ad.cost_per_result)}/lead
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Bottom Ads */}
+                  <div className="rounded-2xl bg-white border border-slate-200 p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-5">
+                      <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center border border-amber-100">
+                        <AlertTriangle className="w-4 h-4 text-amber-500" />
+                      </div>
+                      <h3 className="font-semibold text-slate-900 text-sm">Underperforming Ads</h3>
+                    </div>
+                    {loading ? (
+                      <div className="space-y-3">
+                        {[...Array(3)].map((_, i) => (
+                          <div key={i} className="h-14 bg-slate-50 rounded-xl animate-pulse" />
+                        ))}
+                      </div>
+                    ) : group.bottom_ads.length === 0 ? (
+                      <p className="text-slate-400 text-sm">No underperformers detected.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {group.bottom_ads.map((ad, i) => (
+                          <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                            <span className="text-lg font-bold text-amber-500 w-6 text-center">
+                              {i + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-900 truncate">{ad.ad_name}</p>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                <span className="font-medium text-slate-700">{formatINR(ad.spend)} spend</span> · {ad.results} leads
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -1065,6 +1191,36 @@ function DashboardClient() {
         </>
       )}
     </div>
+  );
+}
+
+function ChangeChip({
+  value,
+  invertGood = false,
+}: {
+  value: number | null;
+  invertGood?: boolean;
+}) {
+  if (value === null) {
+    return <span className="text-slate-400 text-xs">N/A</span>;
+  }
+  const good = invertGood ? value < 0 : value > 0;
+  const sign = value > 0 ? "+" : "";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
+        good
+          ? "bg-emerald-50 text-emerald-600 border border-emerald-100"
+          : "bg-red-50 text-red-600 border border-red-100"
+      }`}
+    >
+      {value > 0 ? (
+        <TrendingUp className="w-3 h-3" />
+      ) : (
+        <TrendingDown className="w-3 h-3" />
+      )}
+      {sign}{Math.abs(value).toFixed(1)}%
+    </span>
   );
 }
 

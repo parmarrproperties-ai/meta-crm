@@ -90,7 +90,52 @@ export async function GET(req: NextRequest) {
     }
 
     const aggregatedSnapshots = aggregateSnapshots(snapshots);
-    const summary = computeDailySummary(aggregatedSnapshots, `${startDate} to ${endDate}`);
+    
+    // Calculate prior period date range
+    const sdDate = new Date(startDate);
+    const edDate = new Date(endDate);
+    const diffDays = Math.round((edDate.getTime() - sdDate.getTime()) / (1000 * 3600 * 24)) + 1;
+    const priorEndDate = new Date(startDate);
+    priorEndDate.setDate(priorEndDate.getDate() - 1);
+    const priorStartDate = new Date(priorEndDate);
+    priorStartDate.setDate(priorStartDate.getDate() - diffDays + 1);
+
+    const priorStartStr = priorStartDate.toISOString().split("T")[0];
+    const priorEndStr = priorEndDate.toISOString().split("T")[0];
+
+    // Fetch prior snapshots
+    let priorQuery = supabase
+      .from("daily_ad_snapshots")
+      .select("*")
+      .gte("snapshot_date", priorStartStr)
+      .lte("snapshot_date", priorEndStr);
+      
+    if (project && project !== "all") {
+      priorQuery = priorQuery.eq("project_name", project);
+    }
+    
+    const { data: priorData, error: priorError } = await priorQuery;
+    
+    let priorSnapshots: AdSnapshot[] | null = null;
+    if (!priorError && priorData) {
+      const pSnaps = priorData.map((row) => ({
+        ad_id: row.ad_id,
+        ad_name: row.ad_name,
+        campaign_name: row.campaign_name ?? "",
+        adset_name: row.adset_name ?? "",
+        spend: Number(row.spend),
+        impressions: Number(row.impressions),
+        clicks: Number(row.clicks),
+        ctr: Number(row.ctr),
+        cpc: Number(row.cpc),
+        cpm: Number(row.cpm),
+        results: Number(row.results),
+        cost_per_result: Number(row.cost_per_result),
+      }));
+      priorSnapshots = aggregateSnapshots(pSnaps);
+    }
+
+    const summary = computeDailySummary(aggregatedSnapshots, `${startDate} to ${endDate}`, priorSnapshots);
 
     // Fetch trend data (last N days aggregated totals) from endDate backward
     const trendStartDate = new Date(endDate);

@@ -7,6 +7,7 @@ interface StatCardProps {
   label: string;
   value: string;
   change?: number | null;
+  changeLabel?: string;
   invertGood?: boolean; // true if lower is better (e.g. CPA)
   icon?: React.ReactNode;
   className?: string;
@@ -17,6 +18,7 @@ export function StatCard({
   label,
   value,
   change,
+  changeLabel = "vs last week",
   invertGood = false,
   icon,
   className,
@@ -75,7 +77,7 @@ export function StatCard({
                 )}
                 <span>
                   {change > 0 ? "+" : ""}
-                  {change.toFixed(1)}% vs last week
+                  {change.toFixed(1)}% {changeLabel}
                 </span>
               </div>
             )}

@@ -6,17 +6,19 @@ export function ShareButton({
   elementId,
   fileName,
   title,
+  subtitle,
 }: {
   elementId: string;
   fileName: string;
   title: string;
+  subtitle?: string;
 }) {
   const [sharing, setSharing] = useState(false);
 
   const handleShare = async () => {
     setSharing(true);
     try {
-      const result = await captureAndShare(elementId, fileName, title);
+      const result = await captureAndShare(elementId, fileName, title, subtitle);
       // Optional: add toast notification here based on result
     } catch (e) {
       console.error(e);

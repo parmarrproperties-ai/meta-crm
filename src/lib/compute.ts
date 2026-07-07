@@ -41,8 +41,13 @@ export interface DailySummary {
   avgCPC: number;
   avgCPM: number;
   avgCPA: number;
+  spendChangePct: number | null;
+  cpaChangePct: number | null;
+  resultsChangePct: number | null;
   bestAd: AdSnapshot | null;
   worstAd: AdSnapshot | null;
+  topAds: AdSnapshot[];
+  bottomAds: AdSnapshot[];
   ads: AdSnapshot[];
   campaigns: Array<{
     campaign_name: string;
@@ -53,6 +58,8 @@ export interface DailySummary {
     cost_per_result: number;
     ctr: number;
     cpc: number;
+    top_ads: AdSnapshot[];
+    bottom_ads: AdSnapshot[];
   }>;
 }
 
@@ -121,7 +128,8 @@ export function round2(n: number | null): number | null {
 /** Compute daily summary from a list of snapshots for one day */
 export function computeDailySummary(
   snapshots: AdSnapshot[],
-  date: string
+  date: string,
+  priorSnapshots: AdSnapshot[] | null = null
 ): DailySummary {
   if (snapshots.length === 0) {
     return {
@@ -134,8 +142,13 @@ export function computeDailySummary(
       avgCPC: 0,
       avgCPM: 0,
       avgCPA: 0,
+      spendChangePct: null,
+      cpaChangePct: null,
+      resultsChangePct: null,
       bestAd: null,
       worstAd: null,
+      topAds: [],
+      bottomAds: [],
       ads: [],
       campaigns: [],
     };
@@ -151,6 +164,19 @@ export function computeDailySummary(
   const avgCPC = totalClicks > 0 ? totalSpend / totalClicks : 0;
   const avgCPM = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000 : 0;
   const avgCPA = totalResults > 0 ? totalSpend / totalResults : 0;
+
+  let spendChangePct = null;
+  let cpaChangePct = null;
+  let resultsChangePct = null;
+
+  if (priorSnapshots) {
+    const priorSpend = priorSnapshots.reduce((s, a) => s + a.spend, 0);
+    const priorResults = priorSnapshots.reduce((s, a) => s + a.results, 0);
+    const priorCPA = priorResults > 0 ? priorSpend / priorResults : 0;
+    spendChangePct = pctChange(totalSpend, priorSpend);
+    cpaChangePct = pctChange(avgCPA, priorCPA);
+    resultsChangePct = pctChange(totalResults, priorResults);
+  }
 
   // Best ad: lowest cost-per-result among ads with at least 1 result
   const adsWithResults = snapshots.filter((a) => a.results > 0);
@@ -170,6 +196,24 @@ export function computeDailySummary(
       ? wastedAds.reduce((worst, a) => (a.spend > worst.spend ? a : worst))
       : null;
 
+  // Top 3 ads: most results (then lowest CPA)
+  const topAds = [...snapshots]
+    .filter((a) => a.results > 0)
+    .sort((a, b) => {
+      if (b.results !== a.results) return b.results - a.results;
+      return a.cost_per_result - b.cost_per_result;
+    })
+    .slice(0, 3);
+
+  // Bottom 3 ads: highest spend with fewest results
+  const bottomAds = [...snapshots]
+    .filter((a) => a.spend > WASTE_SPEND_THRESHOLD)
+    .sort((a, b) => {
+      if (a.results !== b.results) return a.results - b.results;
+      return b.spend - a.spend;
+    })
+    .slice(0, 3);
+
   // Aggregate by campaign
   const campMap = new Map<string, any>();
   for (const a of snapshots) {
@@ -180,11 +224,13 @@ export function computeDailySummary(
       impressions: 0,
       clicks: 0,
       results: 0,
+      ads: [],
     };
     existing.spend += a.spend;
     existing.impressions += a.impressions;
     existing.clicks += a.clicks;
     existing.results += a.results;
+    existing.ads.push(a);
     campMap.set(cName, existing);
   }
 
@@ -198,15 +244,44 @@ export function computeDailySummary(
     avgCPC: round2(avgCPC) ?? 0,
     avgCPM: round2(avgCPM) ?? 0,
     avgCPA: round2(avgCPA) ?? 0,
+    spendChangePct: round2(spendChangePct),
+    cpaChangePct: round2(cpaChangePct),
+    resultsChangePct: round2(resultsChangePct),
     bestAd,
     worstAd,
+    topAds,
+    bottomAds,
     ads: snapshots,
-    campaigns: Array.from(campMap.values()).map(c => ({
-      ...c,
-      cost_per_result: c.results > 0 ? c.spend / c.results : 0,
-      ctr: c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0,
-      cpc: c.clicks > 0 ? c.spend / c.clicks : 0,
-    })).sort((a, b) => b.spend - a.spend),
+    campaigns: Array.from(campMap.values()).map(c => {
+      const campTopAds = [...c.ads]
+        .filter((a: AdSnapshot) => a.results > 0)
+        .sort((a: AdSnapshot, b: AdSnapshot) => {
+          if (b.results !== a.results) return b.results - a.results;
+          return a.cost_per_result - b.cost_per_result;
+        })
+        .slice(0, 3);
+      
+      const campBottomAds = [...c.ads]
+        .filter((a: AdSnapshot) => a.spend > WASTE_SPEND_THRESHOLD)
+        .sort((a: AdSnapshot, b: AdSnapshot) => {
+          if (a.results !== b.results) return a.results - b.results;
+          return b.spend - a.spend;
+        })
+        .slice(0, 3);
+        
+      return {
+        campaign_name: c.campaign_name,
+        spend: c.spend,
+        impressions: c.impressions,
+        clicks: c.clicks,
+        results: c.results,
+        cost_per_result: c.results > 0 ? c.spend / c.results : 0,
+        ctr: c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0,
+        cpc: c.clicks > 0 ? c.spend / c.clicks : 0,
+        top_ads: campTopAds,
+        bottom_ads: campBottomAds,
+      };
+    }).sort((a, b) => b.spend - a.spend),
   };
 }
 

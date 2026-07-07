@@ -171,3 +171,77 @@ export async function fetchAdInsights(
 
   return allInsights;
 }
+
+export interface MetaLead {
+  id: string;
+  created_time: string;
+  ad_id: string;
+  ad_name: string;
+  form_id: string;
+  campaign_name: string;
+  field_data: Record<string, string>;
+}
+
+/**
+ * Fetch leads for a specific ad from Meta Marketing API.
+ * The token needs `leads_retrieval` permission.
+ */
+export async function fetchLeadDetails(adId: string): Promise<MetaLead[]> {
+  const token = process.env.META_ACCESS_TOKEN;
+
+  if (!token || !adId) {
+    throw new Error("Missing META_ACCESS_TOKEN or adId for Meta Leads API fetch.");
+  }
+
+  const fields = [
+    "id",
+    "created_time",
+    "ad_id",
+    "ad_name",
+    "form_id",
+    "campaign_name",
+    "field_data"
+  ].join(",");
+
+  const params = new URLSearchParams({
+    fields,
+    access_token: token,
+    limit: "500",
+  });
+
+  const allLeads: MetaLead[] = [];
+  let url = `${BASE_URL}/${adId}/leads?${params.toString()}`;
+
+  while (url) {
+    const res = await fetch(url);
+    const json = await res.json();
+
+    if (json.error) {
+      throw new Error(`Meta API error ${json.error.code}: ${json.error.message}`);
+    }
+
+    for (const raw of json.data ?? []) {
+      // transform field_data from array of {name, values} to a simple object
+      const fieldDataObj: Record<string, string> = {};
+      if (Array.isArray(raw.field_data)) {
+        for (const field of raw.field_data) {
+          fieldDataObj[field.name] = field.values?.[0] ?? "";
+        }
+      }
+
+      allLeads.push({
+        id: raw.id,
+        created_time: raw.created_time,
+        ad_id: raw.ad_id || adId,
+        ad_name: raw.ad_name || "",
+        form_id: raw.form_id || "",
+        campaign_name: raw.campaign_name || "",
+        field_data: fieldDataObj,
+      });
+    }
+
+    url = json.paging?.next ?? "";
+  }
+
+  return allLeads;
+}
