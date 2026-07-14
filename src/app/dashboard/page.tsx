@@ -592,6 +592,7 @@ function DashboardClient() {
               <h3 className="font-semibold text-slate-900">Portfolio Breakdown</h3>
               <p className="text-xs text-slate-500 mt-1">Cross-project comparison</p>
             </div>
+            <ShareButton elementId="snapshot-portfolio" fileName="portfolio-breakdown" title="Portfolio Breakdown" subtitle={todayLabel} />
           </div>
           <div className="overflow-x-auto w-full">
             <table className="w-full text-sm text-left">
@@ -777,6 +778,7 @@ function DashboardClient() {
             <p className="text-xs text-slate-500 mt-1">Rollup by campaign</p>
           </div>
           <div className="flex items-center gap-4">
+            <ShareButton elementId="snapshot-campaigns" fileName="campaign-performance" title="Campaign Performance" subtitle={todayLabel} />
             <label className="text-sm font-medium text-slate-600 cursor-pointer flex items-center gap-2 select-none">
               <input 
                 type="checkbox" 
