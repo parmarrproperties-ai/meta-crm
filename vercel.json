@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/sync-leads",
-      "schedule": "0 * * * *"
+      "schedule": "0 2 * * *"
     },
     {
       "path": "/api/cron/daily-report",
