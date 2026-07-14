@@ -29,11 +29,12 @@ import {
   Calendar,
 } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
-import { ShareButton } from "@/components/ShareButton";
 import { SnapshotStatCards, SnapshotTable } from "@/components/snapshots/SnapshotComponents";
 import { computeDailySummary, type AdSnapshot as AdRow, type DailySummary } from "@/lib/compute";
 import { useSearchParams } from "next/navigation";
 import { takeCombinedSnapshot } from "@/lib/snapshot";
+import { ShareButton } from "@/components/ShareButton";
+import { motion } from "framer-motion";
 
 interface PortfolioRow {
   project_name: string;
@@ -400,7 +401,7 @@ function DashboardClient() {
   const isAllProjects = currentProject === "all";
 
   return (
-    <div className="p-4 sm:p-8 min-h-screen pb-20">
+    <div className="p-4 sm:p-8 min-h-screen pb-20 max-w-[1600px] mx-auto space-y-12">
       {/* Toast */}
       {toast && (
         <div
@@ -420,7 +421,11 @@ function DashboardClient() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-8">
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        className="flex flex-col sm:flex-row sm:items-start justify-between gap-6"
+      >
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
             {isAllProjects ? "Portfolio Dashboard" : currentProject}
@@ -503,35 +508,22 @@ function DashboardClient() {
               <span className="inline">Share<span className="hidden sm:inline"> via WhatsApp</span></span>
             </button>
 
-            <button
-              onClick={() => {
-                const elements = [
-                  "snapshot-stat-cards", 
-                  "snapshot-change-cards",
-                  ...(isAllProjects && portfolio.length > 0 ? ["snapshot-portfolio"] : []), 
-                  ...(isAllProjects ? [] : ["snapshot-campaigns"]),
-                  "snapshot-ads"
-                ];
-                takeCombinedSnapshot(elements, "daily-dashboard", "Daily Dashboard", todayLabel);
-              }}
-              className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-sm font-medium text-white transition-all duration-150 shadow-sm shadow-slate-900/20 h-[44px] sm:h-auto"
-            >
-              <Share2 className="w-4 h-4" />
-              <span className="inline">Share<span className="hidden sm:inline"> Report (S)</span></span>
-            </button>
+
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Stat Cards */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-slate-900">Top-Level Metrics</h3>
-        <ShareButton elementId="snapshot-stat-cards" fileName="top-level-metrics" title="Top-Level Metrics" subtitle={todayLabel} />
-      </div>
-      
-
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        transition={{ delay: 0.1 }}
+      >
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-semibold text-slate-900 tracking-tight">Top-Level Metrics</h3>
+        </div>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           label="Total Spend"
           value={displayedSummary ? formatINR(displayedSummary.totalSpend) : "₹0"}
@@ -564,9 +556,16 @@ function DashboardClient() {
           loading={loading}
         />
       </div>
+      </motion.div>
 
       {/* Week-over-week change summary */}
-      <div id="snapshot-change-cards" className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 mb-8">
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        transition={{ delay: 0.15 }}
+        id="snapshot-change-cards" 
+        className="grid grid-cols-1 sm:grid-cols-3 gap-6"
+      >
         {[
           { label: "Spend Change", value: displayedSummary?.spendChangePct ?? null, invertGood: false },
           { label: "Leads Change", value: displayedSummary?.resultsChangePct ?? null, invertGood: false },
@@ -577,17 +576,22 @@ function DashboardClient() {
             <ChangeChip value={value} invertGood={invertGood} />
           </div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Portfolio Breakdown (Only if "all" is selected) */}
       {isAllProjects && portfolio.length > 0 && (
-        <div id="snapshot-portfolio" className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm mb-8">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }} 
+          animate={{ opacity: 1, y: 0 }} 
+          transition={{ delay: 0.2 }}
+          id="snapshot-portfolio" 
+          className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm"
+        >
+          <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div>
               <h3 className="font-semibold text-slate-900">Portfolio Breakdown</h3>
               <p className="text-xs text-slate-500 mt-1">Cross-project comparison</p>
             </div>
-            <ShareButton elementId="snapshot-portfolio" fileName="portfolio-breakdown" title="Portfolio Breakdown" subtitle={todayLabel} />
           </div>
           <div className="overflow-x-auto w-full">
             <table className="w-full text-sm text-left">
@@ -627,13 +631,18 @@ function DashboardClient() {
               </tbody>
             </table>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {/* Trend Chart */}
-      <div className="rounded-2xl bg-white border border-slate-200 p-6 mb-8 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="font-semibold text-slate-900">Performance Trend (Last {trendDaysFor(dateRange, customStartDate, customEndDate)} Days)</h3>
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        transition={{ delay: 0.25 }}
+        className="rounded-2xl bg-white border border-slate-200 p-8 shadow-sm"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+          <h3 className="text-lg font-semibold text-slate-900 tracking-tight">Performance Trend (Last {trendDaysFor(dateRange, customStartDate, customEndDate)} Days)</h3>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
             <button
               onClick={() => setActiveChart("spend")}
@@ -709,10 +718,17 @@ function DashboardClient() {
             </LineChart>
           </ResponsiveContainer>
         )}
-      </div>
+      </motion.div>
 
-      {/* Filters Row */}
-      <div className="flex flex-col xl:flex-row gap-4 mb-8">
+      {/* Campaign Performance Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        transition={{ delay: 0.3 }}
+        className="space-y-6"
+      >
+        {/* Filters Row */}
+        <div className="flex flex-col xl:flex-row gap-6">
         {/* Campaign Filter Dropdown */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm flex-1">
           <span className="text-sm font-semibold text-slate-700 sm:ml-2 whitespace-nowrap">Campaign:</span>
@@ -754,14 +770,13 @@ function DashboardClient() {
       </div>
 
       {/* Campaign Performance Table */}
-      <div id="snapshot-campaigns" className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm mb-8">
-        <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
+      <div id="snapshot-campaigns" className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-6 bg-slate-50/50">
           <div>
-            <h3 className="font-semibold text-slate-900">Campaign Performance</h3>
+            <h3 className="text-lg font-semibold text-slate-900 tracking-tight">Campaign Performance</h3>
             <p className="text-xs text-slate-500 mt-1">Rollup by campaign</p>
           </div>
           <div className="flex items-center gap-4">
-            <ShareButton elementId="snapshot-campaigns" fileName="campaign-performance" title="Campaign Performance" subtitle={todayLabel} />
             <label className="text-sm font-medium text-slate-600 cursor-pointer flex items-center gap-2 select-none">
               <input 
                 type="checkbox" 
@@ -1120,6 +1135,7 @@ function DashboardClient() {
           )}
         </div>
       </div>
+      </motion.div>
       {summary && (
         <>
           <SnapshotStatCards

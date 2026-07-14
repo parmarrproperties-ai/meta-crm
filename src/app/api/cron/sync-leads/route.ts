@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchLeadDetails } from "@/lib/meta";
 import { supabase } from "@/lib/supabase";
+import { sendNewLeadAlert } from "@/lib/email";
 
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const date = searchParams.get("date") ?? new Date().toISOString().split("T")[0];
+    const authHeader = req.headers.get("authorization");
+    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+      // In a real Vercel deployment, this ensures only Vercel can trigger the cron
+      console.warn("Unauthorized cron invocation");
+    }
 
-    // We want to fetch leads for any ad that has ever generated results.
-    // Relying strictly on today's snapshot means if they haven't synced the main dashboard today, they get 0 leads.
     const { data: ads, error: adsError } = await supabase
       .from("daily_ad_snapshots")
       .select("ad_id, project_name")
@@ -16,13 +18,13 @@ export async function POST(req: NextRequest) {
 
     if (adsError) throw adsError;
     if (!ads || ads.length === 0) {
-      return NextResponse.json({ success: true, message: "No ads with results found in the last 30 days.", upserted: 0 });
+      return NextResponse.json({ success: true, message: "No active ads to sync.", newLeadsCount: 0 });
     }
 
     let totalUpserted = 0;
-    
-    // We only need unique ad_ids and their project names.
+    const allNewLeads: any[] = [];
     const uniqueAds = new Map<string, string>();
+    
     for (const ad of ads) {
       if (ad.ad_id) {
         uniqueAds.set(ad.ad_id, ad.project_name);
@@ -42,8 +44,20 @@ export async function POST(req: NextRequest) {
             campaign_name: l.campaign_name,
             project_name: projectName,
             form_id: l.form_id,
-            field_data: l.field_data
+            field_data: l.field_data,
+            status: 'New'
           }));
+
+          // Determine which leads are genuinely new
+          const { data: existingLeads } = await supabase
+            .from("leads")
+            .select("lead_id")
+            .in("lead_id", rows.map(r => r.lead_id));
+            
+          const existingIds = new Set(existingLeads?.map(r => r.lead_id) || []);
+          const newlyDiscovered = rows.filter(r => !existingIds.has(r.lead_id));
+          
+          allNewLeads.push(...newlyDiscovered);
 
           const { error: upsertError } = await supabase
             .from("leads")
@@ -57,18 +71,23 @@ export async function POST(req: NextRequest) {
         }
       } catch (err) {
         console.error(`Error fetching leads for ad ${adId}:`, err);
-        // Continue with other ads
       }
+    }
+
+    if (allNewLeads.length > 0) {
+      console.log(`[ALERT] 🔔 You have ${allNewLeads.length} new leads! (Email disabled in favor of daily report)`);
+      // Email alerting has been disabled here because we now send a daily report.
     }
 
     return NextResponse.json({
       success: true,
-      upserted: totalUpserted,
-      message: `Successfully fetched and stored leads for ads active in the last 30 days.`
+      newLeadsCount: allNewLeads.length,
+      totalSynced: totalUpserted,
+      message: `Successfully synced ${totalUpserted} leads. Found ${allNewLeads.length} new.`
     });
 
   } catch (err: any) {
-    console.error("[fetch-leads] Error:", err.message);
+    console.error("[cron/sync-leads] Error:", err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

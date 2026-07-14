@@ -23,8 +23,8 @@ export default function RootLayout({
   const projects = accounts.map(a => a.name);
 
   return (
-    <html lang="en" className="light">
-      <body className={`${geist.className} bg-slate-50 text-slate-900 min-h-screen`}>
+    <html lang="en" className="light" suppressHydrationWarning>
+      <body className={`${geist.className} bg-slate-50 text-slate-900 min-h-screen`} suppressHydrationWarning>
         <Suspense fallback={<div>Loading...</div>}>
           <ClientLayout projects={projects}>
             {children}
