@@ -13,6 +13,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { motion } from "framer-motion";
+import { csvCell } from "@/lib/csv";
 
 interface LeadRow {
   id: string;
@@ -139,10 +140,10 @@ export default function LeadsPage() {
         lead.campaign_name || "",
         lead.ad_name || "",
         ...dynamicColumns.map(col => lead.field_data?.[col] || "")
-      ].map(val => `"${String(val).replace(/"/g, '""')}"`).join(",");
+      ].map(csvCell).join(",");
     });
 
-    const csvContent = [headers.join(","), ...rows].join("\n");
+    const csvContent = "\uFEFF" + [headers.map(csvCell).join(","), ...rows].join("\r\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

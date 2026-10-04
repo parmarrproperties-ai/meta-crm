@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { csvRow, escapeHtml } from "@/lib/csv";
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_placeholder");
 
@@ -22,11 +23,11 @@ export async function sendNewLeadAlert(newLeads: any[]) {
 
     return `
       <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px; background-color: #f8fafc;">
-        <h3 style="margin: 0 0 8px 0; color: #0f172a; font-size: 16px;">Campaign: ${lead.campaign_name || "Unknown"}</h3>
-        <p style="margin: 0 0 4px 0; color: #334155; font-size: 14px;"><strong>Project:</strong> ${lead.project_name || "N/A"}</p>
-        <p style="margin: 0 0 4px 0; color: #334155; font-size: 14px;"><strong>Name:</strong> ${name}</p>
-        <p style="margin: 0 0 4px 0; color: #334155; font-size: 14px;"><strong>Email:</strong> ${email}</p>
-        <p style="margin: 0 0 4px 0; color: #334155; font-size: 14px;"><strong>Phone:</strong> ${phone}</p>
+        <h3 style="margin: 0 0 8px 0; color: #0f172a; font-size: 16px;">Campaign: ${escapeHtml(lead.campaign_name || "Unknown")}</h3>
+        <p style="margin: 0 0 4px 0; color: #334155; font-size: 14px;"><strong>Project:</strong> ${escapeHtml(lead.project_name || "N/A")}</p>
+        <p style="margin: 0 0 4px 0; color: #334155; font-size: 14px;"><strong>Name:</strong> ${escapeHtml(name)}</p>
+        <p style="margin: 0 0 4px 0; color: #334155; font-size: 14px;"><strong>Email:</strong> ${escapeHtml(email)}</p>
+        <p style="margin: 0 0 4px 0; color: #334155; font-size: 14px;"><strong>Phone:</strong> ${escapeHtml(phone)}</p>
       </div>
     `;
   }).join("");
@@ -68,19 +69,20 @@ export async function sendNewLeadAlert(newLeads: any[]) {
 
 function generateLeadsCSV(leads: any[]): string {
   const headers = ["Name", "Phone Number", "Email", "Location", "Configuration", "Remark"];
-  const rows = leads.map(lead => {
+  const rows = leads.map((lead) => {
     const fields = lead.field_data || {};
-    // Strip commas to prevent CSV breakage
-    const name = (fields["full_name"] || fields["name"] || "N/A").replace(/,/g, ' ');
-    const email = (fields["email"] || "N/A").replace(/,/g, ' ');
-    const phone = (fields["phone_number"] || fields["phone"] || "N/A").replace(/,/g, ' ');
-    const location = (fields["city"] || fields["location"] || fields["where_are_you_looking_to_buy_property?"] || "N/A").replace(/,/g, ' ');
-    const config = (fields["configuration"] || fields["project_configuration"] || fields["what_type_of_property_are_you_looking_for?"] || "N/A").replace(/,/g, ' ');
-    
-    return `"${name}","${phone}","${email}","${location}","${config}",""`;
+    return csvRow([
+      fields["full_name"] || fields["name"] || "N/A",
+      fields["phone_number"] || fields["phone"] || "N/A",
+      fields["email"] || "N/A",
+      fields["city"] || fields["location"] || fields["where_are_you_looking_to_buy_property?"] || "N/A",
+      fields["configuration"] || fields["project_configuration"] || fields["what_type_of_property_are_you_looking_for?"] || "N/A",
+      "",
+    ]);
   });
-  
-  return [headers.join(","), ...rows].join("\n");
+
+  // BOM so Excel reads UTF-8 names correctly
+  return "\uFEFF" + [csvRow(headers), ...rows].join("\r\n");
 }
 
 export async function sendDailyReport(yesterdaysLeads: any[], dateStr: string) {
