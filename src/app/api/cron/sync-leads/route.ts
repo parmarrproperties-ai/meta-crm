@@ -44,8 +44,7 @@ export async function GET(req: NextRequest) {
             campaign_name: l.campaign_name,
             project_name: projectName,
             form_id: l.form_id,
-            field_data: l.field_data,
-            status: 'New'
+            field_data: l.field_data
           }));
 
           // Determine which leads are genuinely new
