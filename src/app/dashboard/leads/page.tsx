@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import {
   RefreshCw,
   Search,
@@ -13,6 +13,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { motion } from "framer-motion";
+import { csvCell } from "@/lib/csv";
 
 interface LeadRow {
   id: string;
@@ -107,16 +108,25 @@ export default function LeadsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject, dateRange]);
 
+  const syncOffset = useRef(0); // continuation point when a sync hit its time budget
+
   const handleSyncLeads = async () => {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const dateStr = new Date().toISOString().split("T")[0]; // Sync today by default, or could match date range
-      const res = await fetch(`/api/leads/fetch?date=${dateStr}`, { method: "POST" });
+      const res = await fetch(`/api/leads/fetch?days=7&offset=${syncOffset.current}`, { method: "POST" });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Failed to fetch leads");
-      
-      showToast(`Synced ${json.upserted} leads.`, "success");
+
+      syncOffset.current = json.partial && json.nextOffset ? json.nextOffset : 0;
+
+      if (json.errorCount > 0) {
+        showToast(`Synced ${json.upserted} leads, but ${json.errorCount} ad(s) failed: ${json.errors?.[0]?.error ?? "unknown error"}`, "error");
+      } else if (json.partial) {
+        showToast(`Synced ${json.upserted} leads (${json.adsProcessed}/${json.adsTotal} ads). Click Sync again to continue.`, "success");
+      } else {
+        showToast(`Synced ${json.upserted} leads (${json.newLeadsCount} new).`, "success");
+      }
       await fetchLeads();
     } catch (err: any) {
       showToast(err.message, "error");
@@ -139,10 +149,10 @@ export default function LeadsPage() {
         lead.campaign_name || "",
         lead.ad_name || "",
         ...dynamicColumns.map(col => lead.field_data?.[col] || "")
-      ].map(val => `"${String(val).replace(/"/g, '""')}"`).join(",");
+      ].map(csvCell).join(",");
     });
 
-    const csvContent = [headers.join(","), ...rows].join("\n");
+    const csvContent = "\uFEFF" + [headers.map(csvCell).join(","), ...rows].join("\r\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

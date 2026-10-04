@@ -2,6 +2,7 @@
 
 import { useState, FormEvent, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { safeRedirectPath } from "@/lib/auth";
 import { Lock, Eye, EyeOff, Zap } from "lucide-react";
 
 function LoginForm() {
@@ -11,7 +12,7 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const from = searchParams.get("from") ?? "/dashboard";
+  const from = safeRedirectPath(searchParams.get("from"));
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

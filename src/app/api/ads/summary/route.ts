@@ -12,61 +12,68 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { computeDailySummary, aggregateSnapshots, type AdSnapshot } from "@/lib/compute";
+import { addDays, daysInclusive, isYMD, todayInTz } from "@/lib/dates";
+import { fetchAllRows } from "@/lib/supabasePaged";
+
+export const dynamic = "force-dynamic";
+
+type SnapshotRow = Record<string, any>;
+
+function toSnapshot(row: SnapshotRow): AdSnapshot {
+  return {
+    ad_id: row.ad_id,
+    ad_name: row.ad_name,
+    campaign_name: row.campaign_name ?? "",
+    adset_name: row.adset_name ?? "",
+    spend: Number(row.spend),
+    impressions: Number(row.impressions),
+    clicks: Number(row.clicks),
+    ctr: Number(row.ctr),
+    cpc: Number(row.cpc),
+    cpm: Number(row.cpm),
+    results: Number(row.results),
+    cost_per_result: Number(row.cost_per_result),
+    project_name: row.project_name,
+  };
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const date = searchParams.get("date"); // Legacy param
-  const startDate = searchParams.get("startDate") ?? date ?? new Date().toISOString().split("T")[0];
-  const endDate = searchParams.get("endDate") ?? date ?? new Date().toISOString().split("T")[0];
-  const trendDays = parseInt(searchParams.get("days") ?? "14", 10);
+  const today = todayInTz();
+  const dateParam = searchParams.get("date"); // legacy single-day param
+  const pick = (v: string | null) => (isYMD(v) ? v : null);
+  let startDate = pick(searchParams.get("startDate")) ?? pick(dateParam) ?? today;
+  let endDate = pick(searchParams.get("endDate")) ?? pick(dateParam) ?? today;
+  if (startDate > endDate) [startDate, endDate] = [endDate, startDate];
+  const trendDays = Math.min(366, Math.max(1, parseInt(searchParams.get("days") ?? "14", 10) || 14));
 
   try {
     const project = searchParams.get("project");
+    const filterProject = !!project && project !== "all";
 
-    // Fetch snapshots for the date range
-    let todayQuery = supabase
-      .from("daily_ad_snapshots")
-      .select("*")
-      .gte("snapshot_date", startDate)
-      .lte("snapshot_date", endDate)
-      .order("spend", { ascending: false });
+    // Current period. Paged: PostgREST caps a single response at 1,000 rows,
+    // which a multi-week range across several accounts easily exceeds.
+    const todayData = await fetchAllRows<SnapshotRow>((from, to) => {
+      let q = supabase
+        .from("daily_ad_snapshots")
+        .select("*")
+        .gte("snapshot_date", startDate)
+        .lte("snapshot_date", endDate)
+        .order("spend", { ascending: false })
+        .order("id");
+      if (filterProject) q = q.eq("project_name", project!);
+      return q.range(from, to);
+    });
 
-    if (project && project !== "all") {
-      todayQuery = todayQuery.eq("project_name", project);
-    }
+    const snapshots = todayData.map(toSnapshot);
 
-    const { data: todayData, error: todayError } = await todayQuery;
-
-    if (todayError) {
-      return NextResponse.json(
-        { error: todayError.message },
-        { status: 500 }
-      );
-    }
-
-    const snapshots: AdSnapshot[] = (todayData ?? []).map((row) => ({
-      ad_id: row.ad_id,
-      ad_name: row.ad_name,
-      campaign_name: row.campaign_name ?? "",
-      adset_name: row.adset_name ?? "",
-      spend: Number(row.spend),
-      impressions: Number(row.impressions),
-      clicks: Number(row.clicks),
-      ctr: Number(row.ctr),
-      cpc: Number(row.cpc),
-      cpm: Number(row.cpm),
-      results: Number(row.results),
-      cost_per_result: Number(row.cost_per_result),
-      project_name: row.project_name,
-    }));
-
-    // Calculate Portfolio Breakdown if viewing "all"
+    // Portfolio breakdown when viewing "all"
     let portfolio: any[] = [];
-    if (!project || project === "all") {
+    if (!filterProject) {
       const pMap = new Map<string, any>();
-      for (const row of todayData ?? []) {
+      for (const row of todayData) {
         const p = row.project_name;
-        const aName = row.account_name ?? p; // Fallback for old records
+        const aName = row.account_name ?? p; // fallback for old records
         const key = `${p}::${aName}`;
         const existing = pMap.get(key) ?? {
           project_name: p,
@@ -82,97 +89,64 @@ export async function GET(req: NextRequest) {
         existing.clicks += Number(row.clicks);
         pMap.set(key, existing);
       }
-      portfolio = Array.from(pMap.values()).map(p => ({
-        ...p,
-        cost_per_result: p.results > 0 ? p.spend / p.results : 0,
-        ctr: p.impressions > 0 ? (p.clicks / p.impressions) * 100 : 0,
-      })).sort((a, b) => b.spend - a.spend);
+      portfolio = Array.from(pMap.values())
+        .map((p) => ({
+          ...p,
+          cost_per_result: p.results > 0 ? p.spend / p.results : 0,
+          ctr: p.impressions > 0 ? (p.clicks / p.impressions) * 100 : 0,
+        }))
+        .sort((a, b) => b.spend - a.spend);
     }
 
     const aggregatedSnapshots = aggregateSnapshots(snapshots);
-    
-    // Calculate prior period date range
-    const sdDate = new Date(startDate);
-    const edDate = new Date(endDate);
-    const diffDays = Math.round((edDate.getTime() - sdDate.getTime()) / (1000 * 3600 * 24)) + 1;
-    const priorEndDate = new Date(startDate);
-    priorEndDate.setDate(priorEndDate.getDate() - 1);
-    const priorStartDate = new Date(priorEndDate);
-    priorStartDate.setDate(priorStartDate.getDate() - diffDays + 1);
 
-    const priorStartStr = priorStartDate.toISOString().split("T")[0];
-    const priorEndStr = priorEndDate.toISOString().split("T")[0];
+    // Prior period of equal length, immediately before the current one
+    const diffDays = daysInclusive(startDate, endDate);
+    const priorEndStr = addDays(startDate, -1);
+    const priorStartStr = addDays(priorEndStr, -(diffDays - 1));
 
-    // Fetch prior snapshots
-    let priorQuery = supabase
-      .from("daily_ad_snapshots")
-      .select("*")
-      .gte("snapshot_date", priorStartStr)
-      .lte("snapshot_date", priorEndStr);
-      
-    if (project && project !== "all") {
-      priorQuery = priorQuery.eq("project_name", project);
-    }
-    
-    const { data: priorData, error: priorError } = await priorQuery;
-    
     let priorSnapshots: AdSnapshot[] | null = null;
-    if (!priorError && priorData) {
-      const pSnaps = priorData.map((row) => ({
-        ad_id: row.ad_id,
-        ad_name: row.ad_name,
-        campaign_name: row.campaign_name ?? "",
-        adset_name: row.adset_name ?? "",
-        spend: Number(row.spend),
-        impressions: Number(row.impressions),
-        clicks: Number(row.clicks),
-        ctr: Number(row.ctr),
-        cpc: Number(row.cpc),
-        cpm: Number(row.cpm),
-        results: Number(row.results),
-        cost_per_result: Number(row.cost_per_result),
-      }));
-      priorSnapshots = aggregateSnapshots(pSnaps);
+    try {
+      const priorData = await fetchAllRows<SnapshotRow>((from, to) => {
+        let q = supabase
+          .from("daily_ad_snapshots")
+          .select("*")
+          .gte("snapshot_date", priorStartStr)
+          .lte("snapshot_date", priorEndStr)
+          .order("id");
+        if (filterProject) q = q.eq("project_name", project!);
+        return q.range(from, to);
+      });
+      priorSnapshots = aggregateSnapshots(priorData.map(toSnapshot));
+    } catch (err) {
+      console.warn("[summary] Prior period fetch error:", err instanceof Error ? err.message : err);
     }
 
     const summary = computeDailySummary(aggregatedSnapshots, `${startDate} to ${endDate}`, priorSnapshots);
 
-    // Fetch trend data (last N days aggregated totals) from endDate backward
-    const trendStartDate = new Date(endDate);
-    trendStartDate.setDate(trendStartDate.getDate() - trendDays + 1);
-    const trendStart = trendStartDate.toISOString().split("T")[0];
-
-    let trendQuery = supabase
-      .from("daily_ad_snapshots")
-      .select("snapshot_date, spend, results, impressions, clicks")
-      .gte("snapshot_date", trendStart)
-      .lte("snapshot_date", endDate)
-      .order("snapshot_date", { ascending: true });
-
-    if (project && project !== "all") {
-      trendQuery = trendQuery.eq("project_name", project);
+    // Trend: last N days ending at endDate
+    const trendStart = addDays(endDate, -(trendDays - 1));
+    let trendData: SnapshotRow[] = [];
+    try {
+      trendData = await fetchAllRows<SnapshotRow>((from, to) => {
+        let q = supabase
+          .from("daily_ad_snapshots")
+          .select("snapshot_date, spend, results, impressions, clicks")
+          .gte("snapshot_date", trendStart)
+          .lte("snapshot_date", endDate)
+          .order("snapshot_date", { ascending: true })
+          .order("id");
+        if (filterProject) q = q.eq("project_name", project!);
+        return q.range(from, to);
+      });
+    } catch (err) {
+      console.warn("[summary] Trend data fetch error:", err instanceof Error ? err.message : err);
     }
 
-    const { data: trendData, error: trendError } = await trendQuery;
-
-    if (trendError) {
-      console.warn("[summary] Trend data fetch error:", trendError.message);
-    }
-
-    // Aggregate trend by date
-    const trendMap = new Map<
-      string,
-      { spend: number; results: number; impressions: number; clicks: number }
-    >();
-
-    for (const row of trendData ?? []) {
+    const trendMap = new Map<string, { spend: number; results: number; impressions: number; clicks: number }>();
+    for (const row of trendData) {
       const d = row.snapshot_date;
-      const existing = trendMap.get(d) ?? {
-        spend: 0,
-        results: 0,
-        impressions: 0,
-        clicks: 0,
-      };
+      const existing = trendMap.get(d) ?? { spend: 0, results: 0, impressions: 0, clicks: 0 };
       existing.spend += Number(row.spend);
       existing.results += Number(row.results);
       existing.impressions += Number(row.impressions);

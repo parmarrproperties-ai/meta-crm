@@ -11,40 +11,17 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { computeWeeklySummary, addDays, type AdSnapshot } from "@/lib/compute";
+import { computeWeeklySummary, type AdSnapshot } from "@/lib/compute";
+import { addDays, isYMD, lastCompletedWeekStart, todayInTz } from "@/lib/dates";
+import { fetchAllRows } from "@/lib/supabasePaged";
 import { generateWeeklyNarrative } from "@/lib/claude";
 
-function getMostRecentWeekBounds(): { weekStart: string; weekEnd: string } {
-  const today = new Date();
-  const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-  // Last Monday
-  const lastMonday = new Date(today);
-  lastMonday.setDate(today.getDate() - ((dayOfWeek + 6) % 7) - 7);
-  // Last Sunday
-  const lastSunday = new Date(lastMonday);
-  lastSunday.setDate(lastMonday.getDate() + 6);
-
-  return {
-    weekStart: lastMonday.toISOString().split("T")[0],
-    weekEnd: lastSunday.toISOString().split("T")[0],
-  };
-}
-
-function verifyCronSecret(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return true;
-  const auth = req.headers.get("authorization");
-  return auth === `Bearer ${secret}`;
-}
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  const isCron = req.headers.get("x-vercel-cron") === "1";
-  if (isCron && !verifyCronSecret(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { searchParams } = new URL(req.url);
-  const providedStart = searchParams.get("week_start");
+  const providedStart = isYMD(searchParams.get("week_start")) ? searchParams.get("week_start") : null;
   const project = searchParams.get("project");
   const projectName = project && project !== "all" ? project : "Portfolio";
 
@@ -55,7 +32,8 @@ export async function POST(req: NextRequest) {
     weekStart = providedStart;
     weekEnd = addDays(weekStart, 6);
   } else {
-    ({ weekStart, weekEnd } = getMostRecentWeekBounds());
+    weekStart = lastCompletedWeekStart(todayInTz());
+    weekEnd = addDays(weekStart, 6);
   }
 
   // Previous week bounds
@@ -63,33 +41,22 @@ export async function POST(req: NextRequest) {
   const prevWeekEnd = addDays(weekStart, -1);
 
   try {
-    // Fetch this week's data
-    let thisWeekQuery = supabase
-      .from("daily_ad_snapshots")
-      .select("*")
-      .gte("snapshot_date", weekStart)
-      .lte("snapshot_date", weekEnd);
+    const fetchRange = (from: string, to: string) =>
+      fetchAllRows<Record<string, unknown>>((lo, hi) => {
+        let q = supabase
+          .from("daily_ad_snapshots")
+          .select("*")
+          .gte("snapshot_date", from)
+          .lte("snapshot_date", to)
+          .order("id");
+        if (projectName !== "Portfolio") q = q.eq("project_name", projectName);
+        return q.range(lo, hi);
+      });
 
-    if (projectName !== "Portfolio") {
-      thisWeekQuery = thisWeekQuery.eq("project_name", projectName);
-    }
-    const { data: thisWeekData, error: e1 } = await thisWeekQuery;
-
-    if (e1) return NextResponse.json({ error: e1.message }, { status: 500 });
-
-    // Fetch previous week's data
-    let prevWeekQuery = supabase
-      .from("daily_ad_snapshots")
-      .select("*")
-      .gte("snapshot_date", prevWeekStart)
-      .lte("snapshot_date", prevWeekEnd);
-
-    if (projectName !== "Portfolio") {
-      prevWeekQuery = prevWeekQuery.eq("project_name", projectName);
-    }
-    const { data: prevWeekData, error: e2 } = await prevWeekQuery;
-
-    if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
+    const [thisWeekData, prevWeekData] = await Promise.all([
+      fetchRange(weekStart, weekEnd),
+      fetchRange(prevWeekStart, prevWeekEnd),
+    ]);
 
     const mapRows = (rows: Record<string, unknown>[]): AdSnapshot[] =>
       rows.map((row) => ({
@@ -107,8 +74,8 @@ export async function POST(req: NextRequest) {
         cost_per_result: Number(row.cost_per_result),
       }));
 
-    const thisWeek = mapRows(thisWeekData ?? []);
-    const prevWeek = mapRows(prevWeekData ?? []);
+    const thisWeek = mapRows(thisWeekData);
+    const prevWeek = mapRows(prevWeekData);
 
     const summary = computeWeeklySummary(thisWeek, prevWeek, weekStart, weekEnd);
 
