@@ -12,8 +12,6 @@
  *   ?days=N          trailing window length incl. today (default META_SYNC_DAYS or 7, max 90)
  *   ?date=YYYY-MM-DD sync that single day only
  *   ?since=…&until=… explicit inclusive range (backfill)
- *
- * Auth is enforced centrally in src/proxy.ts (session cookie or CRON_SECRET).
  */
 
 import { NextRequest, NextResponse } from "next/server";

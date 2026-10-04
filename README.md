@@ -19,9 +19,6 @@ See `PRODUCT.md` for the product intent.
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Database (server-side only) |
 | `META_ACCESS_TOKEN` | ✅ | Needs `ads_read` and `leads_retrieval`. Prefer a System User token (does not expire) |
 | `META_AD_ACCOUNTS` | ✅ | JSON: `[{"id":"act_123","name":"Project A"}]`. Optional per-account `"result_action_types":"onsite_conversion.messaging_conversation_started_7d"` |
-| `DASHBOARD_PASSWORD` | ✅ in production | Login password. **If unset in production, the dashboard and every API route return 503** (fail-closed) |
-| `CRON_SECRET` | ✅ in production | Vercel sends it as `Authorization: Bearer …` to cron routes. **Without it, scheduled jobs are rejected** |
-| `AUTH_SECRET` | optional | Signs the session cookie; change it to log everyone out |
 | `RESEND_API_KEY`, `ALERT_EMAIL_ADDRESS` | for email | Daily lead report |
 | `ANTHROPIC_API_KEY` | optional | AI narrative in the weekly report |
 | `WHATSAPP_*` | optional | WhatsApp sends |
@@ -43,9 +40,8 @@ Meta Leads API    ──(cron 07:30 IST + Sync button, trailing 3/7 days)──�
 * **Metrics match Ads Manager** when: attribution uses each ad set's own setting
   (`use_unified_attribution_setting`), clicks/CTR/CPC are *link* clicks, and the
   result action type matches your campaign objective (see `META_RESULT_ACTION_TYPES`).
-* **Auth:** `src/proxy.ts` guards `/dashboard/*` and `/api/*` (session cookie, or
-  `Bearer CRON_SECRET` for jobs). Only `/api/auth/login` is public.
-* **Manual backfills** (while logged in, or with the bearer token):
+* **Auth:** none. The dashboard and every `/api/*` route are open to anyone who has the URL (including lead names, phones and emails). Keep the URL private or add protection (e.g. Vercel Deployment Protection) if that matters.
+* **Manual backfills:**
   `POST /api/ads/fetch-today?since=2026-09-01&until=2026-09-30`,
   `GET /api/cron/sync-leads?full=1` (entire lead history; follow `nextOffset` if `partial`).
 * On Vercel Pro you can run `sync-leads` hourly by changing its schedule in `vercel.json`.

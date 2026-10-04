@@ -6,8 +6,6 @@
  * land in the right day's report.
  *
  *   ?date=YYYY-MM-DD   report on a specific day instead of yesterday
- *
- * Auth is enforced centrally in src/proxy.ts (session cookie or CRON_SECRET).
  */
 
 import { NextRequest, NextResponse } from "next/server";

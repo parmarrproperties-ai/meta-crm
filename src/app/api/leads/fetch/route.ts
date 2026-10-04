@@ -5,8 +5,6 @@
  *   ?days=N   lookback window (default 7)
  *   ?full=1   re-pull the entire history of every ad ever delivered
  *   ?offset=N continue a previous partial run (see `nextOffset` in the response)
- *
- * Auth is enforced centrally in src/proxy.ts.
  */
 
 import { NextRequest, NextResponse } from "next/server";
