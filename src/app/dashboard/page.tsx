@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, Suspense, useMemo } from "react";
+import { daysInclusive, resolveDashboardRange } from "@/lib/dates";
 import {
   LineChart,
   Line,
@@ -97,15 +98,9 @@ function formatDateRangeLabel(range: string, sd?: string, ed?: string): string {
   }
 }
 
-const trendDaysFor = (range: string, sd?: string, ed?: string) => {
-  if (range === "7d") return 7;
-  if (range === "last_month" || range === "30d") return 30;
-  if (range === "custom" && sd && ed) {
-    const diff = new Date(ed).getTime() - new Date(sd).getTime();
-    return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1);
-  }
-  return 14;
-}
+// Trend window = the selected range's length (min 14 days so short ranges still show a line).
+const trendDaysFor = (startDate: string, endDate: string) =>
+  Math.max(14, daysInclusive(startDate, endDate));
 
 function DashboardClient() {
   const searchParams = useSearchParams();
@@ -203,32 +198,8 @@ function DashboardClient() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const today = new Date();
-      let sd = new Date();
-      let ed = new Date();
-      
-      if (dateRange === "yesterday") {
-        sd.setDate(sd.getDate() - 1);
-        ed.setDate(ed.getDate() - 1);
-      } else if (dateRange === "7d") {
-        sd.setDate(sd.getDate() - 6);
-      } else if (dateRange === "14d") {
-        sd.setDate(sd.getDate() - 13);
-      } else if (dateRange === "last_month") {
-        sd = new Date(sd.getFullYear(), sd.getMonth() - 1, 1);
-        ed = new Date(sd.getFullYear(), sd.getMonth(), 0);
-      } else if (dateRange === "custom") {
-        if (customStartDate && customEndDate) {
-          sd = new Date(customStartDate);
-          ed = new Date(customEndDate);
-        }
-      } else if (dateRange === "30d") {
-        sd.setDate(sd.getDate() - 29);
-      }
-
-      const startDate = sd.toISOString().split("T")[0];
-      const endDate = ed.toISOString().split("T")[0];
-      const trendDays = trendDaysFor(dateRange, customStartDate, customEndDate);
+      const { startDate, endDate } = resolveDashboardRange(dateRange, customStartDate, customEndDate);
+      const trendDays = trendDaysFor(startDate, endDate);
 
       const res = await fetch(`/api/ads/summary?project=${encodeURIComponent(currentProject)}&startDate=${startDate}&endDate=${endDate}&days=${trendDays}`);
       const json = await res.json();
@@ -252,7 +223,13 @@ function DashboardClient() {
       const res = await fetch("/api/ads/fetch-today", { method: "POST" });
       const json = await res.json();
       if (json.success) {
-        showToast(`✓ Fetched ${json.upserted} ads from Meta`, "success");
+        const failed = Array.isArray(json.errors) ? json.errors.length : 0;
+        showToast(
+          failed > 0
+            ? `Synced ${json.upserted} rows, but ${failed} account(s) failed: ${json.errors[0].error}`
+            : `✓ Synced ${json.upserted} ad-day rows from Meta`,
+          failed > 0 ? "error" : "success"
+        );
         await loadData();
       } else {
         showToast(json.error ?? "Refresh failed", "error");
@@ -264,6 +241,7 @@ function DashboardClient() {
     }
   };
 
+  const rangeBounds = resolveDashboardRange(dateRange, customStartDate, customEndDate);
   const todayLabel = formatDateRangeLabel(dateRange, customStartDate, customEndDate);
 
   const handleNativeShare = async () => {
@@ -643,7 +621,7 @@ function DashboardClient() {
         className="rounded-2xl bg-white border border-slate-200 p-8 shadow-sm"
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-          <h3 className="text-lg font-semibold text-slate-900 tracking-tight">Performance Trend (Last {trendDaysFor(dateRange, customStartDate, customEndDate)} Days)</h3>
+          <h3 className="text-lg font-semibold text-slate-900 tracking-tight">Performance Trend (Last {trendDaysFor(rangeBounds.startDate, rangeBounds.endDate)} Days)</h3>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
             <button
               onClick={() => setActiveChart("spend")}
