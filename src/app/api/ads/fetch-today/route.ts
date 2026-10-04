@@ -1,56 +1,104 @@
 /**
- * POST /api/ads/fetch-today
+ * GET|POST /api/ads/fetch-today
  *
- * Pulls today's ad insights from Meta Marketing API and upserts
- * them into Supabase daily_ad_snapshots table.
+ * Syncs ad insights from the Meta Marketing API into daily_ad_snapshots.
  *
- * Also accepts ?date=YYYY-MM-DD for historical backfill.
+ * A day's numbers keep changing after the day ends (delayed delivery reporting,
+ * conversions attributed back up to the attribution window), so every run
+ * re-pulls a trailing window and upserts it. Today's partial figures are
+ * therefore overwritten by the final ones on the following runs.
+ *
+ * Query params:
+ *   ?days=N          trailing window length incl. today (default META_SYNC_DAYS or 7, max 90)
+ *   ?date=YYYY-MM-DD sync that single day only
+ *   ?since=…&until=… explicit inclusive range (backfill)
+ *
+ * Auth is enforced centrally in src/proxy.ts (session cookie or CRON_SECRET).
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchAdInsights } from "@/lib/meta";
+import { fetchAdInsights, parseActionTypes } from "@/lib/meta";
 import { supabase } from "@/lib/supabase";
+import { addDays, daysInclusive, isYMD, todayInTz } from "@/lib/dates";
+import { chunk } from "@/lib/supabasePaged";
 
-function verifyCronSecret(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return true; // dev mode — no secret required
-  const auth = req.headers.get("authorization");
-  return auth === `Bearer ${secret}`;
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
+interface AccountConfig {
+  id: string;
+  name: string;
+  result_action_types?: string | string[];
 }
 
+const MAX_DAYS = 90;
+
 export async function POST(req: NextRequest) {
-  // Allow cron invocations with bearer token
-  const isCron = req.headers.get("x-vercel-cron") === "1";
-  if (isCron && !verifyCronSecret(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { searchParams } = new URL(req.url);
+  const today = todayInTz();
+
+  let since: string;
+  let until: string;
+  const dateParam = searchParams.get("date");
+  const sinceParam = searchParams.get("since");
+  const untilParam = searchParams.get("until");
+
+  if (isYMD(dateParam)) {
+    since = until = dateParam;
+  } else if (isYMD(sinceParam)) {
+    since = sinceParam;
+    until = isYMD(untilParam) ? untilParam : today;
+  } else {
+    const requested = parseInt(searchParams.get("days") ?? process.env.META_SYNC_DAYS ?? "7", 10);
+    const days = Math.min(MAX_DAYS, Math.max(1, Number.isFinite(requested) ? requested : 7));
+    until = today;
+    since = addDays(today, -(days - 1));
   }
 
-  const { searchParams } = new URL(req.url);
-  const date =
-    searchParams.get("date") ??
-    new Date().toISOString().split("T")[0]; // today in UTC
+  if (since > until) [since, until] = [until, since];
+  if (daysInclusive(since, until) > MAX_DAYS) since = addDays(until, -(MAX_DAYS - 1));
 
+  let accounts: AccountConfig[];
   try {
-    const accountsJson = process.env.META_AD_ACCOUNTS || "[]";
-    const accounts: { id: string; name: string }[] = JSON.parse(accountsJson);
+    accounts = JSON.parse(process.env.META_AD_ACCOUNTS || "[]");
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "META_AD_ACCOUNTS is not valid JSON." },
+      { status: 500 }
+    );
+  }
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    return NextResponse.json(
+      { success: false, error: "No META_AD_ACCOUNTS configured." },
+      { status: 500 }
+    );
+  }
 
-    if (accounts.length === 0) {
-      return NextResponse.json(
-        { success: false, error: "No META_AD_ACCOUNTS configured." },
-        { status: 500 }
-      );
-    }
+  // Accounts are independent: one failing (expired permission, rate limit)
+  // must not discard the data the others returned.
+  const errors: { account: string; error: string }[] = [];
+  const byKey = new Map<string, Record<string, unknown>>();
 
-    let totalUpserted = 0;
-    const allRows = [];
+  const results = await Promise.all(
+    accounts.map(async (account) => {
+      try {
+        const insights = await fetchAdInsights(since, until, account.id, {
+          resultActionTypes: parseActionTypes(account.result_action_types),
+        });
+        return { account, insights };
+      } catch (err) {
+        errors.push({ account: account.name, error: err instanceof Error ? err.message : String(err) });
+        return { account, insights: [] };
+      }
+    })
+  );
 
-    for (const account of accounts) {
-      console.log(`[fetch-today] Fetching for ${account.name} (${account.id})`);
-      const insights = await fetchAdInsights(date, account.id);
-
-      const rows = insights.map((ad) => ({
-        snapshot_date: date,
-        account_id: ad.account_id || account.id,
+  for (const { account, insights } of results) {
+    for (const ad of insights) {
+      const accountId = ad.account_id || account.id;
+      byKey.set(`${ad.date}|${accountId}|${ad.ad_id}`, {
+        snapshot_date: ad.date,
+        account_id: accountId,
         account_name: ad.account_name,
         project_name: account.name,
         ad_id: ad.ad_id,
@@ -67,49 +115,44 @@ export async function POST(req: NextRequest) {
         cpm: ad.cpm,
         results: ad.results,
         cost_per_result: ad.cost_per_result,
-      }));
-
-      allRows.push(...rows);
-    }
-
-    if (allRows.length === 0) {
-      return NextResponse.json({
-        success: true,
-        message: `No ad data returned from Meta for ${date} across all accounts.`,
-        upserted: 0,
-        date,
       });
     }
+  }
 
-    const { error } = await supabase
-      .from("daily_ad_snapshots")
-      .upsert(allRows, { onConflict: "snapshot_date,account_id,ad_id" });
+  const rows = Array.from(byKey.values());
 
-    if (error) {
-      console.error("[fetch-today] Supabase upsert error:", error);
-      return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 500 }
-      );
+  try {
+    for (const batch of chunk(rows, 500)) {
+      const { error } = await supabase
+        .from("daily_ad_snapshots")
+        .upsert(batch, { onConflict: "snapshot_date,account_id,ad_id" });
+      if (error) throw new Error(error.message);
     }
-
-    return NextResponse.json({
-      success: true,
-      upserted: allRows.length,
-      date,
-      message: `Successfully fetched and stored ${allRows.length} ad snapshots for ${date}.`,
-    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[fetch-today] Error:", message);
-    return NextResponse.json(
-      { success: false, error: message },
-      { status: 500 }
-    );
+    console.error("[fetch-today] Supabase upsert error:", message);
+    return NextResponse.json({ success: false, error: message, errors }, { status: 500 });
   }
+
+  const allFailed = errors.length === accounts.length;
+  if (errors.length > 0) console.error("[fetch-today] account errors:", errors);
+
+  return NextResponse.json(
+    {
+      success: !allFailed,
+      partial: errors.length > 0 && !allFailed,
+      upserted: rows.length,
+      since,
+      until,
+      errors,
+      error: allFailed ? errors.map((e) => `${e.account}: ${e.error}`).join(" | ") : undefined,
+      message: `Synced ${rows.length} ad-day rows for ${since} → ${until}.`,
+    },
+    { status: allFailed ? 502 : 200 }
+  );
 }
 
-// Also support GET for cron triggers (Vercel cron uses GET)
+// Vercel Cron issues GET requests.
 export async function GET(req: NextRequest) {
   return POST(req);
 }
