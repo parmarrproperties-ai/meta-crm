@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, Suspense, useMemo } from "react";
-import { daysInclusive, resolveDashboardRange } from "@/lib/dates";
+import { addDays, daysInclusive, resolveDashboardRange, toYMD } from "@/lib/dates";
 import {
   LineChart,
   Line,
@@ -217,25 +217,52 @@ function DashboardClient() {
     loadData();
   }, [loadData]);
 
+  // Re-sync the range currently on screen from Meta (not just the last few
+  // days), so an old period like last month gets corrected too. Long ranges
+  // are synced in chunks; keep calling until the server says it's done.
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      const res = await fetch("/api/ads/fetch-today", { method: "POST" });
-      const json = await res.json();
-      if (json.success) {
-        const failed = Array.isArray(json.errors) ? json.errors.length : 0;
-        showToast(
-          failed > 0
-            ? `Synced ${json.upserted} rows, but ${failed} account(s) failed: ${json.errors[0].error}`
-            : `✓ Synced ${json.upserted} ad-day rows from Meta`,
-          failed > 0 ? "error" : "success"
-        );
-        await loadData();
-      } else {
-        showToast(json.error ?? "Refresh failed", "error");
+      const { startDate, endDate } = resolveDashboardRange(dateRange, customStartDate, customEndDate);
+      const recent = addDays(toYMD(new Date()), -6);
+      // Always refresh the last 7 days too when the range touches them (late conversions).
+      let since = endDate >= recent && startDate > recent ? recent : startDate;
+      const until = endDate;
+
+      let upserted = 0;
+      const errors: { account: string; error: string }[] = [];
+      for (let i = 0; i < 20; i++) {
+        const res = await fetch(`/api/ads/fetch-today?since=${since}&until=${until}`, { method: "POST" });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error ?? "Refresh failed");
+        upserted += json.upserted ?? 0;
+        if (Array.isArray(json.errors)) errors.push(...json.errors);
+        if (!json.partial || !json.nextSince) break;
+        since = json.nextSince;
+        showToast(`Syncing… ${upserted} rows so far (up to ${since})`, "success");
       }
-    } catch {
-      showToast("Network error during refresh", "error");
+
+      await loadData();
+
+      if (errors.length > 0) {
+        showToast(`Synced ${upserted} rows, but ${errors.length} request(s) failed: ${errors[0].error}`, "error");
+        return;
+      }
+
+      // Verify against Meta's own account totals for the range.
+      const projectQs = currentProject !== "all" ? `&project=${encodeURIComponent(currentProject)}` : "";
+      const rec = await (await fetch(`/api/ads/reconcile?since=${startDate}&until=${endDate}${projectQs}`)).json();
+      const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+      if (rec.success && !rec.matches) {
+        showToast(
+          `Synced ${upserted} rows. Meta reports ${inr(rec.total_meta_spend)} spend vs ${inr(rec.total_stored_spend)} stored — see /api/ads/reconcile for details.`,
+          "error"
+        );
+      } else {
+        showToast(`✓ Synced ${upserted} rows${rec.success ? ` · matches Meta (${inr(rec.total_meta_spend)})` : ""}`, "success");
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Network error during refresh", "error");
     } finally {
       setRefreshing(false);
     }

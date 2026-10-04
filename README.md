@@ -41,7 +41,13 @@ Meta Leads API    ──(cron 07:30 IST + Sync button, trailing 3/7 days)──�
   (`use_unified_attribution_setting`), clicks/CTR/CPC are *link* clicks, and the
   result action type matches your campaign objective (see `META_RESULT_ACTION_TYPES`).
 * **Auth:** none. The dashboard and every `/api/*` route are open to anyone who has the URL (including lead names, phones and emails). Keep the URL private or add protection (e.g. Vercel Deployment Protection) if that matters.
+* **Checking totals against Meta:** `GET /api/ads/reconcile?since=2026-09-01&until=2026-09-30`
+  compares Meta's account-level spend (what Ads Manager shows) with the stored rows per
+  account and lists days with no data. The dashboard's Refresh button re-syncs the range
+  on screen and runs this check automatically.
+* **Deleted/archived ads** are requested explicitly; Meta otherwise omits them from
+  ad-level reports, which made past periods add up to less than Ads Manager.
 * **Manual backfills:**
-  `POST /api/ads/fetch-today?since=2026-09-01&until=2026-09-30`,
+  `POST /api/ads/fetch-today?since=2026-09-01&until=2026-09-30` (max 90 days; if the response says `partial`, call again with `since=<nextSince>`),
   `GET /api/cron/sync-leads?full=1` (entire lead history; follow `nextOffset` if `partial`).
 * On Vercel Pro you can run `sync-leads` hourly by changing its schedule in `vercel.json`.

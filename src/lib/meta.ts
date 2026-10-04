@@ -163,6 +163,26 @@ async function graphGet<T = any>(url: string, maxAttempts = 4): Promise<T> {
   throw lastError instanceof Error ? lastError : new MetaApiError("Meta API request failed");
 }
 
+/**
+ * Ad-level insights omit ads that have since been deleted or archived unless
+ * they are explicitly requested, so a past month's total comes out lower than
+ * Ads Manager's account total. Ask for every effective status.
+ */
+const ALL_AD_STATUSES = [
+  "ACTIVE",
+  "PAUSED",
+  "DELETED",
+  "ARCHIVED",
+  "CAMPAIGN_PAUSED",
+  "ADSET_PAUSED",
+  "PENDING_REVIEW",
+  "DISAPPROVED",
+  "PREAPPROVED",
+  "PENDING_BILLING_INFO",
+  "IN_PROCESS",
+  "WITH_ISSUES",
+];
+
 export function normalizeAccountId(accountId: string): string {
   return /^\d+$/.test(accountId) ? `act_${accountId}` : accountId;
 }
@@ -213,11 +233,33 @@ export async function fetchAdInsights(
     limit: "500",
   });
 
+  const withStatuses = new URLSearchParams(params);
+  withStatuses.set(
+    "filtering",
+    JSON.stringify([{ field: "ad.effective_status", operator: "IN", value: ALL_AD_STATUSES }])
+  );
+
+  const base = `${BASE_URL}/${normalizeAccountId(accountId)}/insights?`;
+  let url = base + withStatuses.toString();
+  let first = true;
   const out: MetaAdInsight[] = [];
-  let url = `${BASE_URL}/${normalizeAccountId(accountId)}/insights?${params.toString()}`;
 
   while (url) {
-    const json = await graphGet<{ data?: RawInsight[]; paging?: { next?: string } }>(url);
+    let json: { data?: RawInsight[]; paging?: { next?: string } };
+    try {
+      json = await graphGet(url);
+    } catch (err) {
+      // If this API version rejects the status filter (invalid parameter),
+      // fall back to the unfiltered request rather than syncing nothing.
+      if (first && err instanceof MetaApiError && err.code === 100) {
+        console.warn("[meta] effective_status filter rejected, retrying without it:", err.message);
+        url = base + params.toString();
+        first = false;
+        continue;
+      }
+      throw err;
+    }
+    first = false;
 
     for (const raw of json.data ?? []) {
       const spend = parseFloat(raw.spend ?? "0") || 0;
@@ -251,6 +293,32 @@ export async function fetchAdInsights(
   }
 
   return out;
+}
+
+/**
+ * Account-level totals for a date range: the same figure Ads Manager shows in
+ * its account summary row (includes deleted/archived ads). Used to verify that
+ * the stored ad-level rows add up.
+ */
+export async function fetchAccountTotals(
+  since: string,
+  until: string,
+  accountId: string
+): Promise<{ spend: number; impressions: number }> {
+  const params = new URLSearchParams({
+    fields: "spend,impressions",
+    level: "account",
+    time_range: JSON.stringify({ since, until }),
+    use_unified_attribution_setting: "true",
+  });
+  const json = await graphGet<{ data?: { spend?: string; impressions?: string }[] }>(
+    `${BASE_URL}/${normalizeAccountId(accountId)}/insights?${params.toString()}`
+  );
+  const row = json.data?.[0];
+  return {
+    spend: parseFloat(row?.spend ?? "0") || 0,
+    impressions: parseInt(row?.impressions ?? "0", 10) || 0,
+  };
 }
 
 export interface MetaLead {
