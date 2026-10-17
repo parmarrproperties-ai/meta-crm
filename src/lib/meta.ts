@@ -380,3 +380,38 @@ export async function fetchLeadDetails(adId: string, sinceUnix?: number): Promis
 
   return all;
 }
+
+/**
+ * Fetch one lead by id (used by the instant lead webhook). Uses
+ * META_PAGE_ACCESS_TOKEN when set, otherwise META_ACCESS_TOKEN; either needs
+ * `leads_retrieval` and access to the Page that owns the lead form.
+ */
+export async function fetchLeadById(leadgenId: string): Promise<MetaLead> {
+  const fields = ["id", "created_time", "ad_id", "ad_name", "form_id", "campaign_name", "field_data"].join(",");
+  const url = `${BASE_URL}/${encodeURIComponent(leadgenId)}?fields=${fields}`;
+  const raw = process.env.META_PAGE_ACCESS_TOKEN
+    ? await (async () => {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${process.env.META_PAGE_ACCESS_TOKEN}` },
+          cache: "no-store",
+        });
+        const json = await res.json();
+        if (json.error) throw new MetaApiError(`Meta API error ${json.error.code}: ${json.error.message}`, json.error.code, res.status);
+        return json;
+      })()
+    : await graphGet<any>(url);
+
+  const fieldData: Record<string, string> = {};
+  if (Array.isArray(raw.field_data)) {
+    for (const field of raw.field_data) fieldData[field.name] = field.values?.[0] ?? "";
+  }
+  return {
+    id: raw.id,
+    created_time: raw.created_time,
+    ad_id: raw.ad_id || "",
+    ad_name: raw.ad_name || "",
+    form_id: raw.form_id || "",
+    campaign_name: raw.campaign_name || "",
+    field_data: fieldData,
+  };
+}

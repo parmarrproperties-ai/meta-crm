@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { leadSyncResponse, syncLeads } from "@/lib/leadSync";
+import { startPendingConversations } from "@/lib/bot/engine";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -28,7 +29,15 @@ export async function GET(req: NextRequest) {
         : { lookbackDays: days, adWindowDays: Math.max(21, days), offset }
     );
     const body = leadSyncResponse(result);
-    return NextResponse.json(body, { status: body.success ? 200 : 502 });
+
+    // WhatsApp bot safety net: greet recent leads the instant webhook missed.
+    let botStarted = 0;
+    try {
+      botStarted = await startPendingConversations(24, 30);
+    } catch (err) {
+      console.error("[cron/sync-leads] bot start failed:", err);
+    }
+    return NextResponse.json({ ...body, botStarted }, { status: body.success ? 200 : 502 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[cron/sync-leads] Error:", message);
