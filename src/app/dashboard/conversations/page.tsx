@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bot, MessageCircle, Pause, Play, RefreshCw, Send, CheckCircle2, Sheet } from "lucide-react";
 import { adminFetch } from "@/lib/bot/adminKeyClient";
 
@@ -69,7 +70,9 @@ export default function ConversationsPage() {
   const [rows, setRows] = useState<ConvRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  // Opened from the Qualified Leads page: jump straight to that chat.
+  const [selected, setSelected] = useState<string | null>(searchParams.get("lead"));
   const [thread, setThread] = useState<{
     conversation: ConvRow & { answers?: Record<string, unknown>; lead_questions?: string | null };
     messages: Msg[];

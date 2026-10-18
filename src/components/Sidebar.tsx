@@ -15,7 +15,8 @@ import {
   Check,
   X,
   Users,
-  BookOpen
+  BookOpen,
+  Target
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
@@ -34,6 +35,11 @@ const navItems = [
     label: "Leads",
     href: "/dashboard/leads",
     icon: Users,
+  },
+  {
+    label: "Qualified Leads",
+    href: "/dashboard/qualified",
+    icon: Target,
   },
   {
     label: "WhatsApp Bot",
