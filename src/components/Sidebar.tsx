@@ -14,7 +14,8 @@ import {
   LayoutGrid,
   Check,
   X,
-  Users
+  Users,
+  BookOpen
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
@@ -33,6 +34,16 @@ const navItems = [
     label: "Leads",
     href: "/dashboard/leads",
     icon: Users,
+  },
+  {
+    label: "WhatsApp Bot",
+    href: "/dashboard/conversations",
+    icon: MessageCircle,
+  },
+  {
+    label: "Knowledge Base",
+    href: "/dashboard/knowledge",
+    icon: BookOpen,
   },
 ];
 

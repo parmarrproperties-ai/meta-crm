@@ -4,11 +4,17 @@ Next.js dashboard that syncs Meta (Facebook/Instagram) ad performance and lead-g
 leads into Supabase, flags wasted spend, and emails/WhatsApps reports.
 See `PRODUCT.md` for the product intent.
 
+**WhatsApp lead bot:** new leads get an instant WhatsApp message, answer
+qualifying questions with buttons, are scored Hot/Warm/Cold, are written to a
+Google Sheet and get automatic follow-ups. Setup steps and all of its
+environment variables: [`docs/WHATSAPP_BOT_SETUP.md`](docs/WHATSAPP_BOT_SETUP.md).
+
 ## Setup
 
 1. Create the tables: run `supabase/schema.sql` (⚠️ it **drops and recreates** the
    snapshot/report tables – only for a fresh project) and `supabase/setup_leads_table.sql`
    (idempotent, safe to re-run; adds the `status` column to existing databases).
+   For the WhatsApp bot also run `supabase/setup_whatsapp_bot.sql` (idempotent).
 2. Set the environment variables below (Vercel → Settings → Environment Variables).
 3. `npm install && npm run dev`
 
@@ -22,6 +28,7 @@ See `PRODUCT.md` for the product intent.
 | `RESEND_API_KEY`, `ALERT_EMAIL_ADDRESS` | for email | Daily lead report |
 | `ANTHROPIC_API_KEY` | optional | AI narrative in the weekly report |
 | `WHATSAPP_*` | optional | WhatsApp sends |
+| `GEMINI_API_KEY`, `GOOGLE_SHEET_ID`, `META_APP_SECRET`, `BOT_ADMIN_KEY` … | for the bot | See `docs/WHATSAPP_BOT_SETUP.md` |
 | `APP_TIMEZONE` | optional | Business timezone for "today"/"yesterday" (default `Asia/Kolkata`) |
 | `META_API_VERSION` | optional | Graph API version (default `v23.0`). Bump when Meta retires it |
 | `META_RESULT_ACTION_TYPES` | optional | Comma-separated priority list that defines a "result" (default `lead,onsite_conversion.lead_grouped,offsite_conversion.fb_pixel_lead,onsite_conversion.messaging_conversation_started_7d`) |
@@ -32,6 +39,8 @@ See `PRODUCT.md` for the product intent.
 ```
 Meta Insights API ──(cron 01:30 IST + Refresh button, trailing 7 days)──▶ daily_ad_snapshots ──▶ dashboard / weekly report
 Meta Leads API    ──(cron 07:30 IST + Sync button, trailing 3/7 days)──▶ leads ──▶ Leads page / daily email (09:00 IST)
+Meta lead webhook ──(instant)──▶ leads ──▶ WhatsApp bot ──▶ wa_conversations / Google Sheet
+WhatsApp webhook  ──(instant)──▶ bot replies;  cron 11:00 IST ──▶ follow-ups + Sheet statuses + "to follow up" email
 ```
 
 * **Why trailing days:** Meta keeps revising a day's numbers after it ends (late
