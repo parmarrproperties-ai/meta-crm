@@ -99,3 +99,11 @@ ALTER TABLE public.wa_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.knowledge_base ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.llm_model_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.llm_usage ENABLE ROW LEVEL SECURITY;
+
+-- Bot-wide switches set from the dashboard (e.g. the "Pause WhatsApp" button).
+CREATE TABLE IF NOT EXISTS public.bot_settings (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.bot_settings ENABLE ROW LEVEL SECURITY;

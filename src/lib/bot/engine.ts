@@ -52,6 +52,7 @@ import {
   withLock,
 } from "@/lib/bot/store";
 import { supabase } from "@/lib/supabase";
+import { isBotPaused } from "@/lib/bot/settings";
 import { todayInTz } from "@/lib/dates";
 import { WhatsAppSendResult, markRead, sendButtons, sendList, sendTemplate, sendText, whatsappConfigured } from "@/lib/whatsapp";
 
@@ -152,26 +153,97 @@ export async function startConversationForLead(lead: LeadInput): Promise<{ start
 
   let conv = c;
   if (state === "awaiting_start" && phone) {
-    const P: ConvPatch = {};
-    const ok = await deliver(c, P, `template:${TEMPLATES.welcome}`, `[template ${TEMPLATES.welcome}]`, async () => {
-      const r = await sendTemplate(phone, TEMPLATES.welcome, [firstName(name), projectLabel(lead.project_name)]);
-      if (!r.success) P.error = `${r.errorCode ?? ""} ${r.error ?? ""}`.trim();
-      if (r.errorCode === 131026) P.state = "undeliverable";
-      return r;
-    });
-    if (ok) {
-      P.followup_track = "nudge";
-      P.followup_stage = 0;
-      P.next_followup_at = new Date(Date.now() + FOLLOWUPS.nudge[0]).toISOString();
-    } else {
-      P.state = P.state ?? "failed";
-      P.needs_attention = true;
-      P.attention_reason = "welcome message not sent";
-    }
-    conv = await updateConversation(c.lead_id, P);
+    conv = (await isBotPaused())
+      ? // Paused: keep the lead, send nothing. "Send pending welcomes" sends it later.
+        await updateConversation(c.lead_id, {
+          state: "failed",
+          needs_attention: true,
+          attention_reason: "WhatsApp paused – welcome not sent yet",
+          sheet_dirty: true,
+        })
+      : await sendWelcome(c);
   }
   await syncSheet(conv);
-  return { started: state === "awaiting_start" && !conv.error };
+  return { started: conv.state === "awaiting_start" && !conv.error };
+}
+
+/** Meta error codes that mean the template isn't usable yet (not approved, paused, wrong language). */
+const TEMPLATE_NOT_READY = new Set([132000, 132001, 132005, 132007, 132012, 132015, 132016]);
+
+/**
+ * Send the welcome template and save the outcome. A failure caused by the
+ * template not being approved yet is retried later by retryFailedWelcomes().
+ */
+async function sendWelcome(c: Conversation): Promise<Conversation> {
+  const P: ConvPatch = {};
+  let code: number | undefined;
+  const ok = await deliver(c, P, `template:${TEMPLATES.welcome}`, `[template ${TEMPLATES.welcome}]`, async () => {
+    const r = await sendTemplate(c.phone!, TEMPLATES.welcome, [firstName(c.name), projectLabel(c.project_name)]);
+    if (!r.success) {
+      code = r.errorCode;
+      P.error = `${r.errorCode ?? ""} ${r.error ?? ""}`.trim();
+    }
+    return r;
+  });
+  if (ok) {
+    Object.assign(P, {
+      state: "awaiting_start",
+      error: null,
+      needs_attention: false,
+      attention_reason: null,
+      followup_track: "nudge",
+      followup_stage: 0,
+      next_followup_at: new Date(Date.now() + FOLLOWUPS.nudge[0]).toISOString(),
+    } satisfies ConvPatch);
+  } else if (code === 131026) {
+    Object.assign(P, { state: "undeliverable", needs_attention: true, attention_reason: "not on WhatsApp" } satisfies ConvPatch);
+  } else {
+    P.state = "failed";
+    P.needs_attention = true;
+    P.attention_reason =
+      code !== undefined && TEMPLATE_NOT_READY.has(code)
+        ? "welcome waiting for template approval (will retry)"
+        : "welcome message not sent (will retry)";
+  }
+  return updateConversation(c.lead_id, { ...P, sheet_dirty: true });
+}
+
+/**
+ * Re-send welcomes that failed, e.g. because the template wasn't approved yet.
+ * Only for leads who never replied, from the last `days` days. The daily job
+ * retries template failures only; welcomes held back by a pause are sent only
+ * when you press "Send pending welcomes" (includePaused).
+ */
+export async function retryFailedWelcomes(
+  days = 7,
+  max = 100,
+  includePaused = false
+): Promise<{ tried: number; sent: number; lastError?: string }> {
+  if (!whatsappConfigured() || process.env.WA_BOT_ENABLED === "false" || (await isBotPaused())) return { tried: 0, sent: 0 };
+  let q = supabase
+    .from("wa_conversations")
+    .select("*")
+    .eq("state", "failed")
+    .is("last_inbound_at", null)
+    .not("phone", "is", null)
+    .gte("started_at", new Date(Date.now() - days * DAY).toISOString());
+  if (!includePaused) q = q.or('attention_reason.is.null,attention_reason.not.like."WhatsApp paused*"');
+  const { data, error } = await q.order("started_at", { ascending: true }).limit(max);
+  if (error) throw new Error(error.message);
+
+  let sent = 0;
+  let lastError: string | undefined;
+  const deadline = Date.now() + 40_000;
+  for (const c of (data ?? []) as Conversation[]) {
+    if (Date.now() > deadline) break;
+    const updated = await sendWelcome(c);
+    if (updated.state === "awaiting_start") sent++;
+    else lastError = updated.error ?? undefined;
+    await syncSheet(updated);
+    // The template is still not approved: no point trying the rest now.
+    if (sent === 0 && lastError && /132001|does not exist/i.test(lastError)) break;
+  }
+  return { tried: data?.length ?? 0, sent, lastError };
 }
 
 /**
@@ -488,6 +560,13 @@ async function processMessage(c: Conversation, m: Inbound): Promise<ConvPatch> {
     unanswered_followups: 0,
     last_message: text || m.buttonText || m.replyTitle || `[${m.type}]`,
   };
+
+  // WhatsApp paused from the dashboard: save the message, flag it, send nothing.
+  if (await isBotPaused()) {
+    P.needs_attention = true;
+    P.attention_reason = "new message (WhatsApp paused)";
+    return P;
+  }
   void markRead(m.messageId);
 
   if (c.state === "opted_out") {
