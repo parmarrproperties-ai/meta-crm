@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, Bot, MessageCircle, Pause, Play, RefreshCw, Send, CheckCircle2, Sheet } from "lucide-react";
+import { AlertCircle, ArrowLeft, Bot, MessageCircle, Pause, Play, RefreshCw, Send, CheckCircle2, Sheet, PauseCircle, PlayCircle } from "lucide-react";
 import { adminFetch } from "@/lib/bot/adminKeyClient";
 
 interface ConvRow {
@@ -82,6 +82,18 @@ export default function ConversationsPage() {
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [botState, setBotState] = useState<{ paused: boolean; pendingWelcomes: number } | null>(null);
+
+  const loadBotState = useCallback(async () => {
+    const res = await fetch("/api/bot/settings");
+    const json = await res.json().catch(() => null);
+    if (json?.success) setBotState({ paused: json.paused, pendingWelcomes: json.pendingWelcomes });
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetching
+    loadBotState();
+  }, [loadBotState]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadList = useCallback(async () => {
@@ -165,6 +177,49 @@ export default function ConversationsPage() {
     }
   };
 
+  const togglePause = async () => {
+    if (!botState) return;
+    const pausing = !botState.paused;
+    if (
+      pausing &&
+      !window.confirm("Pause WhatsApp? The bot will stop sending welcomes, replies and follow-ups to everyone until you resume.")
+    )
+      return;
+    setBusy(true);
+    try {
+      const res = await adminFetch("/api/bot/settings", { method: "POST", body: JSON.stringify({ paused: pausing }) });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Could not change the setting");
+      setBotState({ paused: json.paused, pendingWelcomes: json.pendingWelcomes });
+      flash(pausing ? "WhatsApp paused ⏸ Nothing will be sent automatically." : "WhatsApp resumed ▶ The bot is replying again.");
+    } catch (e) {
+      flash(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendPendingWelcomes = async () => {
+    if (!botState?.pendingWelcomes) return;
+    if (!window.confirm(`Send the welcome message to ${botState.pendingWelcomes} lead(s) who haven't received it yet?`)) return;
+    setBusy(true);
+    try {
+      const res = await adminFetch("/api/bot/retry-welcomes", { method: "POST" });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Sending failed");
+      flash(
+        json.sent > 0
+          ? `Sent ${json.sent} of ${json.tried} welcome message(s) ✅`
+          : `Not sent: ${json.lastError ?? "nothing to send"}`
+      );
+      await Promise.all([loadBotState(), loadList()]);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const conv = thread?.conversation;
   const windowOpen = thread?.windowOpen ?? false;
 
@@ -206,6 +261,47 @@ export default function ConversationsPage() {
           </button>
         </div>
       </div>
+
+      {botState && (
+        <div
+          className={`flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border p-4 mb-4 ${
+            botState.paused ? "bg-amber-50 border-amber-200" : "bg-white border-slate-200"
+          }`}
+        >
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${botState.paused ? "bg-amber-500" : "bg-emerald-500"}`} />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900">{botState.paused ? "WhatsApp is paused" : "WhatsApp bot is on"}</p>
+              <p className="text-xs text-slate-600">
+                {botState.paused
+                  ? "Nothing is sent automatically. New leads and messages are saved; you can still reply manually below."
+                  : "Welcomes, replies and follow-ups are sent automatically."}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {!botState.paused && botState.pendingWelcomes > 0 && (
+              <button
+                onClick={sendPendingWelcomes}
+                disabled={busy}
+                className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 whitespace-nowrap"
+              >
+                Send pending welcomes ({botState.pendingWelcomes})
+              </button>
+            )}
+            <button
+              onClick={togglePause}
+              disabled={busy}
+              className={`inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg whitespace-nowrap ${
+                botState.paused ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "bg-amber-500 hover:bg-amber-600 text-white"
+              }`}
+            >
+              {botState.paused ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
+              {botState.paused ? "Resume WhatsApp" : "Pause WhatsApp"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-[360px_1fr] gap-4">
         {/* List */}

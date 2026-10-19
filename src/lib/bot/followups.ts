@@ -12,7 +12,8 @@
 
 import { Resend } from "resend";
 import { FOLLOWUPS, PAUSE_BOT_STATUSES, STOP_FOLLOWUP_STATUSES, TEMPLATES } from "@/lib/bot/config";
-import { projectLabel, startPendingConversations, syncSheet } from "@/lib/bot/engine";
+import { projectLabel, retryFailedWelcomes, startPendingConversations, syncSheet } from "@/lib/bot/engine";
+import { isBotPaused } from "@/lib/bot/settings";
 import { readStatuses, sheetsConfigured } from "@/lib/bot/sheets";
 import { ConvPatch, Conversation, recordOutbound, updateConversation } from "@/lib/bot/store";
 import { escapeHtml } from "@/lib/csv";
@@ -32,6 +33,8 @@ export interface FollowupRunResult {
   sheetRowsSynced: number;
   conversationsStarted: number;
   digestSent: boolean;
+  welcomesRetried: number;
+  paused: boolean;
   errors: string[];
 }
 
@@ -212,6 +215,8 @@ export async function runFollowups(budgetMs = 50_000): Promise<FollowupRunResult
     sheetRowsSynced: 0,
     conversationsStarted: 0,
     digestSent: false,
+    welcomesRetried: 0,
+    paused: await isBotPaused(),
     errors: [],
   };
   const step = async (name: string, fn: () => Promise<void>) => {
@@ -225,7 +230,13 @@ export async function runFollowups(budgetMs = 50_000): Promise<FollowupRunResult
   await step("sheet statuses", async () => {
     result.statusesApplied = await applySheetStatuses();
   });
-  if (whatsappConfigured()) await step("follow-ups", () => sendDue(result, deadline));
+  // Paused: nothing goes out. Due follow-ups stay due and send after you resume.
+  if (whatsappConfigured() && !result.paused) {
+    await step("follow-ups", () => sendDue(result, deadline));
+    await step("welcome retries", async () => {
+      result.welcomesRetried = (await retryFailedWelcomes(7, 50)).sent;
+    });
+  }
   await step("pending conversations", async () => {
     result.conversationsStarted = await startPendingConversations(24, 30);
   });

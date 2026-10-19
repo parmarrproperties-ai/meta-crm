@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { configuredModels } from "@/lib/bot/llm";
 import { TEMPLATES } from "@/lib/bot/config";
+import { isBotPaused } from "@/lib/bot/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export async function GET() {
 
   return NextResponse.json({
     success: true,
+    whatsappPaused: await isBotPaused(),
     database: convs.error ? `error: ${convs.error.message} (did you run supabase/setup_whatsapp_bot.sql?)` : "ok",
     checklist: {
       whatsapp: has("WHATSAPP_ACCESS_TOKEN") && has("WHATSAPP_PHONE_NUMBER_ID"),
