@@ -107,3 +107,16 @@ CREATE TABLE IF NOT EXISTS public.bot_settings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE public.bot_settings ENABLE ROW LEVEL SECURITY;
+
+-- One-time cleanup: leads that were only waiting for their welcome message
+-- (WhatsApp paused, or template not approved yet) were wrongly marked
+-- "needs you". Un-flag them. Safe to re-run; real problems are untouched.
+UPDATE public.wa_conversations
+SET needs_attention = false, sheet_dirty = true
+WHERE needs_attention
+  AND state = 'failed'
+  AND (
+    attention_reason LIKE 'WhatsApp paused%'
+    OR attention_reason LIKE 'welcome message not sent'
+    OR attention_reason LIKE 'welcome waiting for template approval%'
+  );

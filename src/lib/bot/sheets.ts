@@ -124,7 +124,7 @@ const BOT_STATUS: Record<string, string> = {
   opted_out: "Unsubscribed",
   no_response: "No response",
   undeliverable: "Not on WhatsApp",
-  failed: "Send failed",
+  failed: "Welcome not sent",
 };
 
 export interface SheetLeadInfo {

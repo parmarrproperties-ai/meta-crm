@@ -157,7 +157,9 @@ export async function startConversationForLead(lead: LeadInput): Promise<{ start
       ? // Paused: keep the lead, send nothing. "Send pending welcomes" sends it later.
         await updateConversation(c.lead_id, {
           state: "failed",
-          needs_attention: true,
+          // Waiting, not a problem: nothing for you to do until you resume.
+          // The reason text also marks this lead as held by the pause.
+          needs_attention: false,
           attention_reason: "WhatsApp paused – welcome not sent yet",
           sheet_dirty: true,
         })
@@ -197,13 +199,16 @@ async function sendWelcome(c: Conversation): Promise<Conversation> {
     } satisfies ConvPatch);
   } else if (code === 131026) {
     Object.assign(P, { state: "undeliverable", needs_attention: true, attention_reason: "not on WhatsApp" } satisfies ConvPatch);
+  } else if (code !== undefined && TEMPLATE_NOT_READY.has(code)) {
+    // Template not approved yet: retried automatically, nothing for you to do.
+    P.state = "failed";
+    P.needs_attention = false;
+    P.attention_reason = "welcome waiting for template approval (will retry)";
   } else {
+    // Anything else is unexpected (bad number, rate limit, …): worth a look.
     P.state = "failed";
     P.needs_attention = true;
-    P.attention_reason =
-      code !== undefined && TEMPLATE_NOT_READY.has(code)
-        ? "welcome waiting for template approval (will retry)"
-        : "welcome message not sent (will retry)";
+    P.attention_reason = "welcome message not sent (will retry)";
   }
   return updateConversation(c.lead_id, { ...P, sheet_dirty: true });
 }
