@@ -12,7 +12,7 @@
 
 import { Resend } from "resend";
 import { FOLLOWUPS, PAUSE_BOT_STATUSES, STOP_FOLLOWUP_STATUSES, TEMPLATES } from "@/lib/bot/config";
-import { projectLabel, retryFailedWelcomes, startPendingConversations, syncSheet } from "@/lib/bot/engine";
+import { autoSendFreshWelcomes, projectLabel, startPendingConversations, syncSheet } from "@/lib/bot/engine";
 import { isBotPaused } from "@/lib/bot/settings";
 import { readStatuses, sheetsConfigured } from "@/lib/bot/sheets";
 import { ConvPatch, Conversation, recordOutbound, updateConversation } from "@/lib/bot/store";
@@ -234,7 +234,7 @@ export async function runFollowups(budgetMs = 50_000): Promise<FollowupRunResult
   if (whatsappConfigured() && !result.paused) {
     await step("follow-ups", () => sendDue(result, deadline));
     await step("welcome retries", async () => {
-      result.welcomesRetried = (await retryFailedWelcomes(7, 50)).sent;
+      result.welcomesRetried = (await autoSendFreshWelcomes(50)).sent;
     });
   }
   await step("pending conversations", async () => {
