@@ -222,6 +222,13 @@ export const STOP_FOLLOWUP_STATUSES = new Set(
 /** Sheet statuses that also stop the bot from replying (you are handling the lead). */
 export const PAUSE_BOT_STATUSES = new Set(["handled by me", "junk"]);
 
+/**
+ * Leads still waiting for their welcome (it was held by a pause, or failed) are
+ * sent it automatically while they are younger than this. Older ones are never
+ * sent automatically: pick them on the WhatsApp Bot page.
+ */
+export const WELCOME_AUTO_MAX_AGE_HOURS = Number(process.env.WELCOME_AUTO_MAX_HOURS || 48);
+
 /** After this many off-topic messages the bot stops answering them. */
 export const MAX_OFF_TOPIC = 3;
 /** AI calls allowed per lead per day, and for the whole bot per day. */

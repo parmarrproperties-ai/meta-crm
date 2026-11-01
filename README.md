@@ -45,7 +45,7 @@ WhatsApp Cloud API · Gemini · Resend
 | **Weekly Report** | Week-over-week trends |
 | **Leads** | All lead-form leads, statuses and CSV export |
 | **Qualified Leads** | Every lead's answers in one table, split into **From ads** (bot messaged them) and **Messaged us** (they messaged first) |
-| **WhatsApp Bot** | Live chats, Pause / Resume WhatsApp, pause the bot per lead, reply manually, send pending welcomes |
+| **WhatsApp Bot** | Live chats, Pause / Resume WhatsApp, pause the bot per lead, reply manually, and pick which waiting leads get their welcome |
 | **Knowledge Base** | Project facts the bot may use to answer questions |
 
 ---
@@ -88,7 +88,7 @@ paid.
 | 07:30 daily | Sync leads (trailing 3 days) and greet any lead the webhook missed |
 | 09:00 daily | Email yesterday's leads |
 | 09:00 Tuesday | Build the weekly report |
-| 11:00 daily | WhatsApp follow-ups, retry unsent welcomes, Sheet statuses, "to follow up" email |
+| 11:00 daily | WhatsApp follow-ups, send waiting welcomes to recent leads, Sheet statuses, "to follow up" email |
 
 ---
 
@@ -160,6 +160,7 @@ Put local settings in `.env.local`. It isn't committed.
 | `GEMINI_MODELS` | optional | Model order to rotate through when one is rate-limited |
 | `LLM_DAILY_CAP` | optional | Max AI calls per day (default 1500) |
 | `BOT_LIVE_FROM` | optional | ISO date; leads before it are never messaged |
+| `WELCOME_AUTO_MAX_HOURS` | optional | Waiting welcomes for leads younger than this are sent automatically (default 48). Older ones need your pick |
 | `WA_BOT_ENABLED` | optional | `false` turns the bot off entirely. The **Pause WhatsApp** button is the everyday switch |
 | `BUSINESS_NAME` | optional | Default `Parmar Properties` |
 | `DEFAULT_COUNTRY_CODE` | optional | Added to 10-digit numbers (default `91`) |
@@ -225,9 +226,12 @@ Meta changes WhatsApp prices; check WhatsApp Manager → Insights.
 
 ## Good to know
 
-- **Templates need approval.** Until `lead_welcome` is approved, form leads
-  show "Send failed". They're retried automatically every day, or immediately
-  with **Send pending welcomes**.
+- **Waiting welcomes.** A lead whose welcome wasn't sent (WhatsApp was paused,
+  or the template wasn't approved yet) shows "Welcome not sent". Recent ones
+  (under 48 hours, set with `WELCOME_AUTO_MAX_HOURS`) are sent automatically
+  when you press **Resume WhatsApp** and every day at 11 AM. Older ones are
+  never sent automatically: open **Waiting for welcome** on the WhatsApp Bot
+  page, tick the leads you want, and press **Send to selected**.
 - **Unpublished Meta app:** WhatsApp works, but instant lead webhooks for
   real customers need the app in **Live** mode.
 - **Security:** the dashboard has no login. Anyone with the URL can view

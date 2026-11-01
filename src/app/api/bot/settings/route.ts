@@ -1,28 +1,27 @@
 /**
- * GET  /api/bot/settings — { paused, pendingWelcomes }
+ * GET  /api/bot/settings — { paused, autoHours, pending }
+ *        pending = leads still waiting for their welcome (auto: true = will be
+ *        sent automatically, false = waiting for you to pick them)
  * POST /api/bot/settings — { paused: boolean } (needs the x-admin-key header)
+ *        Resuming also starts sending the fresh waiting welcomes in the background.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { requireAdmin } from "@/lib/bot/adminAuth";
+import { WELCOME_AUTO_MAX_AGE_HOURS } from "@/lib/bot/config";
+import { autoSendFreshWelcomes, listPendingWelcomes } from "@/lib/bot/engine";
 import { isBotPaused, setBotPaused } from "@/lib/bot/settings";
-import { supabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
-
-async function pendingWelcomes(): Promise<number> {
-  const { count } = await supabase
-    .from("wa_conversations")
-    .select("lead_id", { count: "exact", head: true })
-    .eq("state", "failed")
-    .is("last_inbound_at", null)
-    .not("phone", "is", null)
-    .gte("started_at", new Date(Date.now() - 7 * 86_400_000).toISOString());
-  return count ?? 0;
-}
+export const maxDuration = 60;
 
 export async function GET() {
-  return NextResponse.json({ success: true, paused: await isBotPaused(), pendingWelcomes: await pendingWelcomes() });
+  return NextResponse.json({
+    success: true,
+    paused: await isBotPaused(),
+    autoHours: WELCOME_AUTO_MAX_AGE_HOURS,
+    pending: await listPendingWelcomes(),
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -34,7 +33,18 @@ export async function POST(req: NextRequest) {
   }
   try {
     await setBotPaused(body.paused);
-    return NextResponse.json({ success: true, paused: body.paused, pendingWelcomes: await pendingWelcomes() });
+    const pending = await listPendingWelcomes();
+    const autoCount = body.paused ? 0 : pending.filter((l) => l.auto).length;
+    if (autoCount > 0) {
+      after(() => autoSendFreshWelcomes().catch((err) => console.error("[settings] auto welcomes failed:", err)));
+    }
+    return NextResponse.json({
+      success: true,
+      paused: body.paused,
+      autoHours: WELCOME_AUTO_MAX_AGE_HOURS,
+      pending,
+      autoSending: autoCount,
+    });
   } catch (err) {
     return NextResponse.json({ success: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

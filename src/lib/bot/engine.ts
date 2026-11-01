@@ -14,6 +14,7 @@ import {
   Answers,
   BUSINESS_NAME,
   FOLLOWUPS,
+  WELCOME_AUTO_MAX_AGE_HOURS,
   LLM_CALLS_PER_LEAD_PER_DAY,
   MAX_OFF_TOPIC,
   NOT_INTERESTED_WORDS,
@@ -213,42 +214,106 @@ async function sendWelcome(c: Conversation): Promise<Conversation> {
   return updateConversation(c.lead_id, { ...P, sheet_dirty: true });
 }
 
-/**
- * Re-send welcomes that failed, e.g. because the template wasn't approved yet.
- * Only for leads who never replied, from the last `days` days. The daily job
- * retries template failures only; welcomes held back by a pause are sent only
- * when you press "Send pending welcomes" (includePaused).
- */
-export async function retryFailedWelcomes(
-  days = 7,
-  max = 100,
-  includePaused = false
-): Promise<{ tried: number; sent: number; lastError?: string }> {
-  if (!whatsappConfigured() || process.env.WA_BOT_ENABLED === "false" || (await isBotPaused())) return { tried: 0, sent: 0 };
-  let q = supabase
+export interface PendingWelcome {
+  lead_id: string;
+  name: string | null;
+  phone: string | null;
+  project_name: string | null;
+  started_at: string;
+  /** Why it hasn't been sent: held by a pause, template not ready, or an error. */
+  reason: string | null;
+  /** True when it will be sent automatically (young enough), false when it needs your pick. */
+  auto: boolean;
+}
+
+const PENDING_LOOKBACK_DAYS = 30;
+
+/** Leads who never replied and are still waiting for their welcome, newest first. */
+export async function listPendingWelcomes(): Promise<PendingWelcome[]> {
+  const { data, error } = await supabase
     .from("wa_conversations")
-    .select("*")
+    .select("lead_id, name, phone, project_name, started_at, attention_reason")
     .eq("state", "failed")
     .is("last_inbound_at", null)
     .not("phone", "is", null)
-    .gte("started_at", new Date(Date.now() - days * DAY).toISOString());
-  if (!includePaused) q = q.or('attention_reason.is.null,attention_reason.not.like."WhatsApp paused*"');
-  const { data, error } = await q.order("started_at", { ascending: true }).limit(max);
+    .gte("started_at", new Date(Date.now() - PENDING_LOOKBACK_DAYS * DAY).toISOString())
+    .order("started_at", { ascending: false })
+    .limit(500);
   if (error) throw new Error(error.message);
+  const autoCutoff = Date.now() - WELCOME_AUTO_MAX_AGE_HOURS * 3600_000;
+  return (data ?? []).map((r) => ({
+    lead_id: r.lead_id,
+    name: r.name,
+    phone: r.phone,
+    project_name: r.project_name,
+    started_at: r.started_at,
+    reason: r.attention_reason,
+    auto: new Date(r.started_at).getTime() >= autoCutoff,
+  }));
+}
 
-  let sent = 0;
-  let lastError: string | undefined;
-  const deadline = Date.now() + 40_000;
-  for (const c of (data ?? []) as Conversation[]) {
-    if (Date.now() > deadline) break;
-    const updated = await sendWelcome(c);
-    if (updated.state === "awaiting_start") sent++;
-    else lastError = updated.error ?? undefined;
-    await syncSheet(updated);
-    // The template is still not approved: no point trying the rest now.
-    if (sent === 0 && lastError && /132001|does not exist/i.test(lastError)) break;
+export interface WelcomeSendResult {
+  tried: number;
+  sent: number;
+  /** Not sent because they replied, were already sent, or were removed. */
+  skipped: number;
+  failed: number;
+  /** Not reached before the time limit; the next run picks them up. */
+  left: number;
+  lastError?: string;
+}
+
+/**
+ * Send the welcome to these leads. Each one is re-checked under its lock, so a
+ * lead is never welcomed twice even if two runs overlap (e.g. Resume and the
+ * daily job). Stops early when the first few all fail (e.g. template not ready).
+ */
+export async function sendWelcomesTo(leadIds: string[]): Promise<WelcomeSendResult> {
+  const result: WelcomeSendResult = { tried: 0, sent: 0, skipped: 0, failed: 0, left: 0 };
+  if (!whatsappConfigured() || process.env.WA_BOT_ENABLED === "false" || (await isBotPaused())) {
+    result.left = leadIds.length;
+    return result;
   }
-  return { tried: data?.length ?? 0, sent, lastError };
+  const deadline = Date.now() + 45_000;
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      if (Date.now() > deadline || (result.failed >= 3 && result.sent === 0)) return;
+      const id = leadIds[next++];
+      if (id === undefined) return;
+      result.tried++;
+      try {
+        const updated = await withLock(id, async () => {
+          const c = await getConversation(id);
+          if (!c || c.state !== "failed" || !c.phone || c.last_inbound_at) return null;
+          return sendWelcome(c);
+        });
+        if (!updated) result.skipped++;
+        else if (updated.state === "awaiting_start") result.sent++;
+        else {
+          result.failed++;
+          result.lastError = updated.error ?? result.lastError;
+        }
+        if (updated) await syncSheet(updated);
+      } catch (err) {
+        result.failed++;
+        result.lastError = err instanceof Error ? err.message : String(err);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  result.left = Math.max(0, leadIds.length - result.tried);
+  return result;
+}
+
+/**
+ * Automatic catch-up for welcomes that weren't sent (paused, or template not
+ * ready) while the lead is still fresh. Runs when you press Resume and in the
+ * daily job. Older leads are left for you to pick.
+ */
+export async function autoSendFreshWelcomes(max = 100): Promise<WelcomeSendResult> {
+  const fresh = (await listPendingWelcomes()).filter((l) => l.auto).reverse(); // oldest first
+  return sendWelcomesTo(fresh.slice(0, max).map((l) => l.lead_id));
 }
 
 /**

@@ -23,6 +23,23 @@ interface ConvRow {
   next_followup_at: string | null;
 }
 
+interface PendingWelcome {
+  lead_id: string;
+  name: string | null;
+  phone: string | null;
+  project_name: string | null;
+  started_at: string;
+  reason: string | null;
+  /** true = sent automatically, false = only if you pick it */
+  auto: boolean;
+}
+
+interface BotState {
+  paused: boolean;
+  autoHours: number;
+  pending: PendingWelcome[];
+}
+
 interface Msg {
   id: string;
   direction: "in" | "out";
@@ -82,12 +99,14 @@ export default function ConversationsPage() {
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [botState, setBotState] = useState<{ paused: boolean; pendingWelcomes: number } | null>(null);
+  const [botState, setBotState] = useState<BotState | null>(null);
+  const [showPending, setShowPending] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   const loadBotState = useCallback(async () => {
     const res = await fetch("/api/bot/settings");
     const json = await res.json().catch(() => null);
-    if (json?.success) setBotState({ paused: json.paused, pendingWelcomes: json.pendingWelcomes });
+    if (json?.success) setBotState({ paused: json.paused, autoHours: json.autoHours, pending: json.pending ?? [] });
   }, []);
 
   useEffect(() => {
@@ -190,8 +209,15 @@ export default function ConversationsPage() {
       const res = await adminFetch("/api/bot/settings", { method: "POST", body: JSON.stringify({ paused: pausing }) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Could not change the setting");
-      setBotState({ paused: json.paused, pendingWelcomes: json.pendingWelcomes });
-      flash(pausing ? "WhatsApp paused ⏸ Nothing will be sent automatically." : "WhatsApp resumed ▶ The bot is replying again.");
+      setBotState({ paused: json.paused, autoHours: json.autoHours, pending: json.pending ?? [] });
+      flash(
+        pausing
+          ? "WhatsApp paused ⏸ Nothing will be sent automatically."
+          : json.autoSending > 0
+            ? `WhatsApp resumed ▶ Sending welcomes to ${json.autoSending} recent lead(s) now.`
+            : "WhatsApp resumed ▶ The bot is replying again."
+      );
+      if (!pausing) setTimeout(() => { loadBotState(); loadList(); }, 15000);
     } catch (e) {
       flash(e instanceof Error ? e.message : String(e));
     } finally {
@@ -199,19 +225,29 @@ export default function ConversationsPage() {
     }
   };
 
-  const sendPendingWelcomes = async () => {
-    if (!botState?.pendingWelcomes) return;
-    if (!window.confirm(`Send the welcome message to ${botState.pendingWelcomes} lead(s) who haven't received it yet?`)) return;
+  const togglePick = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const sendSelectedWelcomes = async () => {
+    const ids = Array.from(picked).filter((id) => botState?.pending.some((p) => p.lead_id === id));
+    if (ids.length === 0) return;
+    if (!window.confirm(`Send the welcome message to the ${ids.length} selected lead(s)?`)) return;
     setBusy(true);
     try {
-      const res = await adminFetch("/api/bot/retry-welcomes", { method: "POST" });
+      const res = await adminFetch("/api/bot/send-welcomes", { method: "POST", body: JSON.stringify({ leadIds: ids }) });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || "Sending failed");
       flash(
         json.sent > 0
-          ? `Sent ${json.sent} of ${json.tried} welcome message(s) ✅`
+          ? `Sent ${json.sent} of ${ids.length} welcome message(s) ✅${json.failed ? ` ${json.failed} failed: ${json.lastError ?? ""}` : ""}${json.left ? ` ${json.left} not reached, send again.` : ""}`
           : `Not sent: ${json.lastError ?? "nothing to send"}`
       );
+      setPicked(new Set());
       await Promise.all([loadBotState(), loadList()]);
     } catch (e) {
       flash(e instanceof Error ? e.message : String(e));
@@ -275,18 +311,17 @@ export default function ConversationsPage() {
               <p className="text-xs text-slate-600">
                 {botState.paused
                   ? "Nothing is sent automatically. New leads and messages are saved; you can still reply manually below."
-                  : "Welcomes, replies and follow-ups are sent automatically."}
+                  : `Welcomes, replies and follow-ups are sent automatically.${botState.pending.length > 0 ? ` ${botState.pending.length} lead(s) are waiting for a welcome.` : ""}`}
               </p>
             </div>
           </div>
           <div className="flex gap-2">
-            {!botState.paused && botState.pendingWelcomes > 0 && (
+            {!botState.paused && botState.pending.length > 0 && (
               <button
-                onClick={sendPendingWelcomes}
-                disabled={busy}
+                onClick={() => setShowPending((v) => !v)}
                 className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 whitespace-nowrap"
               >
-                Send pending welcomes ({botState.pendingWelcomes})
+                Waiting for welcome ({botState.pending.length})
               </button>
             )}
             <button
@@ -298,6 +333,69 @@ export default function ConversationsPage() {
             >
               {botState.paused ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
               {botState.paused ? "Resume WhatsApp" : "Pause WhatsApp"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {botState && !botState.paused && showPending && botState.pending.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 mb-4">
+          <p className="text-sm font-semibold text-slate-900">Leads waiting for their welcome message</p>
+          <p className="text-xs text-slate-600 mt-1">
+            Leads younger than {botState.autoHours} hours are sent automatically (when you press Resume, and every day at 11 AM).
+            Older ones are only sent if you tick them here.
+          </p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <button
+              onClick={() => setPicked(new Set(botState.pending.filter((p) => !p.auto).map((p) => p.lead_id)))}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50"
+            >
+              Tick older ({botState.pending.filter((p) => !p.auto).length})
+            </button>
+            <button
+              onClick={() => setPicked(new Set(botState.pending.map((p) => p.lead_id)))}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50"
+            >
+              Tick all
+            </button>
+            <button onClick={() => setPicked(new Set())} className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50">
+              Clear
+            </button>
+          </div>
+          <ul className="mt-3 max-h-72 overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-lg">
+            {botState.pending.map((p) => (
+              <li key={p.lead_id}>
+                <label className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={picked.has(p.lead_id)}
+                    onChange={() => togglePick(p.lead_id)}
+                    className="mt-1 h-4 w-4 shrink-0"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-slate-900 truncate">{p.name || "Lead"}</span>
+                    <span className="block text-xs text-slate-500 truncate">
+                      {p.phone ? `+${p.phone}` : ""}
+                      {p.project_name ? ` · ${p.project_name}` : ""}
+                    </span>
+                  </span>
+                  <span className="text-right shrink-0">
+                    <span className="block text-xs text-slate-500">{timeAgo(p.started_at) === "now" ? "just now" : `${timeAgo(p.started_at)} ago`}</span>
+                    <span className={`block text-[11px] font-medium ${p.auto ? "text-emerald-700" : "text-amber-700"}`}>
+                      {p.auto ? "sends automatically" : "older, needs your pick"}
+                    </span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-end mt-3">
+            <button
+              onClick={sendSelectedWelcomes}
+              disabled={busy || picked.size === 0}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-slate-900 text-white disabled:opacity-40"
+            >
+              <Send className="w-4 h-4" /> Send to selected ({picked.size})
             </button>
           </div>
         </div>
