@@ -33,7 +33,7 @@ const STATE_LABEL: Record<string, string> = {
   opted_out: "Unsubscribed",
   no_response: "No response",
   undeliverable: "Not on WhatsApp",
-  failed: "Send failed",
+  failed: "Welcome not sent",
 };
 
 const STATUS_FILTERS = [
